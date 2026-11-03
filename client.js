@@ -18,6 +18,8 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'status-sidebar';
     /** Page the panel embeds. */
     const STATUS_URL = 'https://status.deepseek.com';
+    /** Host route returning the newest `Status:` value from the RSS feed. */
+    const FEED_ROUTE = 'api/status-sidebar.feed';
 
     const DICTS = {
       en: {
@@ -109,12 +111,112 @@ window.__ModuleLoader__.load({
       }
     `;
 
+    /** Theme state colors; the literal fallback covers themes without the token. */
+    const COLORS = {
+      green: 'var(--dsw-alias-state-success-primary, #22c55e)',
+      red: 'var(--dsw-alias-state-error-primary, #f25a5a)',
+      yellow: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
+      rest: 'currentColor',
+    };
+
     /**
-     * Sidebar glyph: Lucide's `activity` icon at the size the sidebar requests.
-     * Path data from lucide-static v1.67.0 (ISC, https://lucide.dev/icons/activity);
-     * the 1.6px stroke is this plugin's choice, not Lucide's 2px default.
+     * Lucide shapes used by the sidebar glyph, inlined from lucide-static
+     * v1.67.0 (ISC, https://lucide.dev/icons/). Each shape is `[tag, props]`.
+     * The 1.6px stroke is this plugin's choice, not Lucide's 2px default.
+     */
+    const GLYPHS = {
+      activity: [
+        ['path', { d: 'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2' }],
+      ],
+      'check-circle-2': [
+        ['circle', { cx: 12, cy: 12, r: 10 }],
+        ['path', { d: 'm16 9-5.5 5.5L8 12' }],
+      ],
+      'circle-alert': [
+        ['circle', { cx: 12, cy: 12, r: 10 }],
+        ['line', { x1: 12, x2: 12, y1: 8, y2: 12 }],
+        ['line', { x1: 12, x2: 12.01, y1: 16, y2: 16 }],
+      ],
+      'clock-alert': [
+        ['path', { d: 'M12 6v6l4 2' }],
+        ['path', { d: 'M20 12v5' }],
+        ['path', { d: 'M20 21h.01' }],
+        ['path', { d: 'M21.25 8.2A10 10 0 1 0 16 21.16' }],
+      ],
+      clock: [
+        ['circle', { cx: 12, cy: 12, r: 10 }],
+        ['path', { d: 'M12 6v6l4 2' }],
+      ],
+    };
+
+    /** Incident status -> sidebar glyph. Unknown or unreadable statuses keep `activity`. */
+    const STATUS_GLYPHS = {
+      completed: { glyph: 'check-circle-2', color: COLORS.green },
+      resolved: { glyph: 'check-circle-2', color: COLORS.green },
+      investigating: { glyph: 'circle-alert', color: COLORS.red },
+      identified: { glyph: 'circle-alert', color: COLORS.red },
+      monitoring: { glyph: 'circle-alert', color: COLORS.red },
+      ongoing: { glyph: 'clock-alert', color: COLORS.red },
+      scheduled: { glyph: 'clock', color: COLORS.yellow },
+    };
+
+    /** Displayed before the feed read settles, and for every unknown status. */
+    const FALLBACK_GLYPH = { glyph: 'activity', color: COLORS.rest };
+
+    /**
+     * Newest status from the startup read: undefined until it settles, null
+     * when the feed or its `Status:` paragraph could not be read.
+     */
+    let feedStatus;
+
+    const feedListeners = new Set();
+
+    let feedRead;
+
+    /** Publish the settled status so a mounted glyph re-renders. */
+    function publishFeedStatus(status) {
+      feedStatus = status;
+      for (const listener of [...feedListeners]) listener();
+    }
+
+    /**
+     * Read the status once per page start. The Host route bypasses the feed's
+     * missing CORS header and extracts the `Status:` value server-side.
+     */
+    function readFeedOnce() {
+      if (feedRead !== undefined) return feedRead;
+      feedRead = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
+        .then(response => (response.ok ? response.json() : null))
+        .then((body) => {
+          publishFeedStatus(typeof body?.status === 'string' ? body.status : null);
+        })
+        .catch(() => {
+          publishFeedStatus(null);
+        });
+      return feedRead;
+    }
+
+    /** Subscribe the glyph to the one startup read. */
+    function useFeedStatus() {
+      const [status, setStatus] = React.useState(feedStatus);
+      React.useEffect(() => {
+        const listener = () => { setStatus(feedStatus) };
+        feedListeners.add(listener);
+        listener();
+        return () => { feedListeners.delete(listener) };
+      }, []);
+      return status;
+    }
+
+    /**
+     * Sidebar glyph: the newest incident status as a Lucide mark, or the plain
+     * `activity` mark while the feed is unreadable.
      */
     function StatusPanelIcon({ size }) {
+      const status = useFeedStatus();
+      const mark = typeof status === 'string' && Object.hasOwn(STATUS_GLYPHS, status)
+        ? STATUS_GLYPHS[status]
+        : FALLBACK_GLYPH;
       return h(
         'svg',
         {
@@ -122,16 +224,14 @@ window.__ModuleLoader__.load({
           width: size,
           height: size,
           fill: 'none',
-          'aria-hidden': 'true',
-          style: { display: 'block' },
-        },
-        h('path', {
-          d: 'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2',
-          stroke: 'currentColor',
+          stroke: mark.color,
           strokeWidth: 1.6,
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
-        }),
+          'aria-hidden': 'true',
+          style: { display: 'block' },
+        },
+        GLYPHS[mark.glyph].map(([tag, props], index) => h(tag, { key: index, ...props })),
       );
     }
 
@@ -206,6 +306,8 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
+        readFeedOnce();
+
         ctx.effect(
           () => ctx.locale.register(NS, DICTS),
           'dsh-status-sidebar: dictionaries',

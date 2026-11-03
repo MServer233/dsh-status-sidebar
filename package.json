@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "private": true,
   "type": "module",
-  "description": "Sidebar panel that embeds the DeepSeek service status page.",
+  "description": "Sidebar panel that embeds the DeepSeek service status page and mirrors the newest incident status in its icon.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -12,6 +12,7 @@
   },
   "files": [
     "index.js",
+    "feed.js",
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
