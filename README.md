@@ -27,6 +27,12 @@
   <https://lucide.dev/icons/activity>），尺寸跟随侧栏传入（展开 16px / 收起 18px），线宽为
   `stroke-width="1.6"`；插件管理页图标 `icon.svg` 仍为本仓库原创图形。
 
+## 版本约定
+
+- `package.json` 的 `version` 必须与仓库当前版本一致，即最新 `v*` git tag 去掉 `v` 前缀
+  （当前为 `1.0.1`，对应 tag `v1.0.1`）。
+- 发版时先更新 `package.json` 的 `version`，合并到 `main` 后再打同名 tag；两者始终同步。
+
 ## 安装
 
 插件以本地 bundle 安装到当前 profile（`web`），安装后对所有会话生效并持久化：
