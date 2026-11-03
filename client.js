@@ -109,12 +109,16 @@ window.__ModuleLoader__.load({
       }
     `;
 
-    /** Sidebar glyph: a status pulse drawn at the size the sidebar requests. */
+    /**
+     * Sidebar glyph: Lucide's `activity` icon at the size the sidebar requests.
+     * Path data from lucide-static v1.67.0 (ISC, https://lucide.dev/icons/activity);
+     * the 3px stroke is this plugin's choice, not Lucide's 2px default.
+     */
     function StatusPanelIcon({ size }) {
       return h(
         'svg',
         {
-          viewBox: '0 0 16 16',
+          viewBox: '0 0 24 24',
           width: size,
           height: size,
           fill: 'none',
@@ -122,9 +126,9 @@ window.__ModuleLoader__.load({
           style: { display: 'block' },
         },
         h('path', {
-          d: 'M1.75 8h2.1l1.5-4 2.4 8.2 1.7-4.2h4.8',
+          d: 'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2',
           stroke: 'currentColor',
-          strokeWidth: 1.3,
+          strokeWidth: 3,
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
         }),

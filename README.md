@@ -12,7 +12,7 @@
 | `index.js` | Host 半侧，空实现（面板完全由 Client 渲染） |
 | `client.js` | Client 半侧：注册 `main` 面板与 `sidebar.panellist` 侧栏入口 |
 | `locale/en.json`、`locale/zh.json` | 插件管理页显示用的标题与说明 |
-| `icon.svg` | 插件图标（本仓库原创的脉冲折线图形） |
+| `icon.svg` | 插件管理页图标（本仓库原创的脉冲折线图形） |
 
 ## 实现要点
 
@@ -23,6 +23,9 @@
   刷新通过更换 iframe 的 React key 重新加载。加载完成前显示加载提示。
 - 样式只使用宿主主题 token（`--dsw-alias-*`），不依赖任何 Harness Client 包。
 - 可见文案通过 Client locale 服务（命名空间 `statusSidebar`）提供英文与中文。
+- 侧栏图标使用 Lucide 的 `activity`，path 数据内联自 `lucide-static` v1.67.0（ISC 许可，
+  <https://lucide.dev/icons/activity>），线宽按需求设为 `stroke-width="3"`；插件管理页图标
+  `icon.svg` 仍为本仓库原创图形。
 
 ## 安装
 
