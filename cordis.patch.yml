@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-status-sidebar
+      name: '@local/dsh-status-sidebar'
+      config: {}

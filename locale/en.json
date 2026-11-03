@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Status sidebar",
+    "description": "Adds a Status entry to the sidebar that embeds the DeepSeek service status page."
+  }
+}
