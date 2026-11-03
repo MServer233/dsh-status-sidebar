@@ -38,7 +38,7 @@
 ## 版本约定
 
 - `package.json` 的 `version` 必须与仓库当前版本一致，即最新 `v*` git tag 去掉 `v` 前缀
-  （当前为 `1.0.1`，对应 tag `v1.0.1`）。
+  （当前为 `1.1.0`，对应 tag `v1.1.0`）。
 - 发版时先更新 `package.json` 的 `version`，合并到 `main` 后再打同名 tag；两者始终同步。
 
 ## 安装
