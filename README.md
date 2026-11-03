@@ -24,8 +24,8 @@
 - 样式只使用宿主主题 token（`--dsw-alias-*`），不依赖任何 Harness Client 包。
 - 可见文案通过 Client locale 服务（命名空间 `statusSidebar`）提供英文与中文。
 - 侧栏图标使用 Lucide 的 `activity`，path 数据内联自 `lucide-static` v1.67.0（ISC 许可，
-  <https://lucide.dev/icons/activity>），以 16×16 尺寸渲染，线宽为 Lucide 默认的
-  `stroke-width="2"`；插件管理页图标 `icon.svg` 仍为本仓库原创图形。
+  <https://lucide.dev/icons/activity>），尺寸跟随侧栏传入（展开 16px / 收起 18px），线宽为
+  `stroke-width="1.6"`；插件管理页图标 `icon.svg` 仍为本仓库原创图形。
 
 ## 安装
 
