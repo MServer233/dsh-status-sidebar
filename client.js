@@ -183,26 +183,8 @@ window.__ModuleLoader__.load({
 
     const feedListeners = new Set();
 
-    let refreshPromise;
-
-    let refreshTimer;
-
-    let reading = true;
-
-    /**
-     * True while the browser reports no network. The timer pauses instead of
-     * retrying into a known-offline link, and the next `online` event resumes.
-     */
-    let networkDown = false;
-
-    /** Position in {@link RETRY_DELAYS_MS}; reset by a success or a network switch. */
-    let retryIndex = 0;
-
-    /**
-     * Set when `online` arrives while a read is in flight: that read may have
-     * started on the dead link, so its result cannot end the outage.
-     */
-    let pendingOnlineRefresh = false;
+    /** The active reader; components reach it through this handle. */
+    let feedReader;
 
     /** Whether the browser currently reports no network at all. */
     function browserOffline() {
@@ -215,78 +197,181 @@ window.__ModuleLoader__.load({
       for (const listener of [...feedListeners]) listener();
     }
 
-    /** Re-arm the read at the cadence the readable status implies. */
-    function scheduleRefresh() {
-      if (!reading) return;
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => {
-        refreshStatus();
-      }, NORMAL_STATUSES.has(feedStatus) ? NORMAL_REFRESH_MS : ALERT_REFRESH_MS);
-    }
-
-    /** Re-confirm a feed the browser claims to be online for, backing off. */
-    function scheduleRetry() {
-      if (!reading) return;
-      clearTimeout(refreshTimer);
-      const delay = RETRY_DELAYS_MS[Math.min(retryIndex, RETRY_DELAYS_MS.length - 1)];
-      retryIndex += 1;
-      refreshTimer = setTimeout(() => {
-        refreshStatus();
-      }, delay);
-    }
-
     /**
-     * Read the status now and re-arm the cadence. Concurrent callers share one
-     * read; the Host route bypasses the feed's missing CORS header.
+     * Single owner of every feed-read decision: page load, new turn, cadence,
+     * backoff, and network changes. Keeping them in one object makes their
+     * ordering explicit:
+     *
+     *   1. A network transition is authoritative. It cancels the pending
+     *      timer, aborts the in-flight read, and discards that read's result,
+     *      so a request started on the old link can never overwrite the new
+     *      network state.
+     *   2. Going offline publishes the unreadable status immediately, so the
+     *      glyph stops showing the last incident at once instead of waiting
+     *      for a request that will never be sent.
+     *   3. Coming back online reads immediately and restarts the backoff.
+     *
+     * `generation` is the ordering token: it advances on each network
+     * transition, and a read applies its result only while its own generation
+     * is still current.
      */
-    function refreshStatus() {
-      if (refreshPromise !== undefined) return refreshPromise;
-      clearTimeout(refreshTimer);
-      // A known-offline link gets no request at all; the `online` listener
-      // resumes the normal read path.
-      if (browserOffline()) {
-        networkDown = true;
-        return Promise.resolve();
+    function createFeedReader(onStatus) {
+      const state = {
+        status: undefined,
+        online: !browserOffline(),
+        reading: false,
+        retryIndex: 0,
+        generation: 0,
+        controller: undefined,
+        timer: undefined,
+      };
+
+      function publish(status) {
+        if (state.status === status) return;
+        state.status = status;
+        onStatus(status);
       }
-      refreshPromise = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
-        .then(response => (response.ok ? response.json() : null))
-        .then((body) => {
-          publishFeedStatus(typeof body?.status === 'string' ? body.status : null);
-        })
-        .catch(() => {
-          publishFeedStatus(null);
-        })
-        .then(() => {
-          refreshPromise = undefined;
-          if (!reading) return;
-          if (feedStatus === null) {
-            // A null status while the browser reports offline is a link-level
-            // failure: wait for `online` instead of retrying the dead route.
-            if (browserOffline()) {
-              networkDown = true;
-              pendingOnlineRefresh = false;
-              clearTimeout(refreshTimer);
-              return;
-            }
-            // The link returned while this read was in flight, so its null
-            // result is stale: read again immediately.
-            if (pendingOnlineRefresh) {
-              pendingOnlineRefresh = false;
-              networkDown = false;
-              refreshStatus();
-              return;
-            }
-            scheduleRetry();
+
+      function clearTimer() {
+        clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+
+      /** Cancel the in-flight read; its generation check drops the result. */
+      function abortRead() {
+        if (state.controller === undefined) return;
+        state.controller.abort();
+        state.controller = undefined;
+      }
+
+      /** Arm one timer; a stopped or offline reader never arms one. */
+      function schedule(delay) {
+        clearTimer();
+        if (!state.reading || !state.online) return;
+        state.timer = setTimeout(() => {
+          state.timer = undefined;
+          request();
+        }, delay);
+      }
+
+      function scheduleCadence() {
+        schedule(NORMAL_STATUSES.has(state.status) ? NORMAL_REFRESH_MS : ALERT_REFRESH_MS);
+      }
+
+      function scheduleRetry() {
+        const delay = RETRY_DELAYS_MS[Math.min(state.retryIndex, RETRY_DELAYS_MS.length - 1)];
+        state.retryIndex += 1;
+        schedule(delay);
+      }
+
+      /** Read once; a concurrent trigger joins the in-flight read. */
+      async function request() {
+        if (!state.reading || state.controller !== undefined) return;
+        // A network transition may have fired after the timer was armed.
+        if (browserOffline()) {
+          markOffline();
+          return;
+        }
+        state.online = true;
+        clearTimer();
+        const generation = state.generation;
+        const controller = new AbortController();
+        state.controller = controller;
+        let status = null;
+        try {
+          const response = await fetch(FEED_ROUTE, {
+            headers: { accept: 'application/json' },
+            credentials: 'same-origin',
+            signal: controller.signal,
+          });
+          const body = response.ok ? await response.json() : null;
+          status = typeof body?.status === 'string' ? body.status : null;
+        } catch {
+          status = null;
+        }
+        // A network transition took over while this read was in flight: the
+        // result describes the old link and must not be published.
+        if (generation !== state.generation) return;
+        state.controller = undefined;
+        if (!state.reading) return;
+        if (status === null) {
+          // A failed read while the browser reports offline is a link-level
+          // failure; show it and wait for `online` instead of retrying.
+          if (browserOffline()) {
+            markOffline();
             return;
           }
-          // A readable feed means the route works even if the browser still
-          // reports no network (for example a loopback Host).
-          networkDown = false;
-          pendingOnlineRefresh = false;
-          retryIndex = 0;
-          scheduleRefresh();
-        });
-      return refreshPromise;
+          publish(null);
+          scheduleRetry();
+          return;
+        }
+        publish(status);
+        state.retryIndex = 0;
+        scheduleCadence();
+      }
+
+      /** No network: stop reading and show the unreadable status now. */
+      function markOffline() {
+        state.generation += 1;
+        state.online = false;
+        state.retryIndex = 0;
+        clearTimer();
+        abortRead();
+        publish(null);
+      }
+
+      /** A network switch: drop the old read and start over at once. */
+      function markOnline() {
+        state.generation += 1;
+        state.online = true;
+        state.retryIndex = 0;
+        clearTimer();
+        abortRead();
+        request();
+      }
+
+      return {
+        start() {
+          state.reading = true;
+          if (browserOffline()) {
+            markOffline();
+            return;
+          }
+          request();
+        },
+        stop() {
+          state.reading = false;
+          clearTimer();
+          abortRead();
+        },
+        /** A new turn or the reader's own timer asks for a read. */
+        refresh() {
+          if (!state.reading) return;
+          if (browserOffline()) {
+            markOffline();
+            return;
+          }
+          request();
+        },
+        offline() {
+          markOffline();
+        },
+        online() {
+          if (browserOffline()) {
+            markOffline();
+            return;
+          }
+          markOnline();
+        },
+        /** A `navigator.connection` type change, which may still be online. */
+        switched() {
+          if (browserOffline()) {
+            markOffline();
+            return;
+          }
+          markOnline();
+        },
+      };
     }
 
     /** Subscribe the glyph to the latest read. */
@@ -324,7 +409,7 @@ window.__ModuleLoader__.load({
         const before = previous.current === '' ? [] : previous.current.split('|');
         const after = running === '' ? [] : running.split('|');
         previous.current = running;
-        if (after.some(id => !before.includes(id))) refreshStatus();
+        if (after.some(id => !before.includes(id))) feedReader?.refresh();
       }, [running]);
     }
 
@@ -428,52 +513,38 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => {
-          reading = true;
           const browser = typeof window === 'undefined' ? undefined : window;
           const connection = typeof navigator === 'undefined' ? undefined : navigator.connection;
-          // Every network switch re-checks immediately: the new link may have
-          // different reachability, so the backoff restarts from the first step.
-          const recheck = () => {
-            networkDown = browserOffline();
-            retryIndex = 0;
-            clearTimeout(refreshTimer);
-            if (refreshPromise !== undefined) {
-              pendingOnlineRefresh = true;
-              return;
-            }
-            refreshStatus();
-          };
-          const onOffline = () => {
-            networkDown = true;
-            clearTimeout(refreshTimer);
-          };
-          const onOnline = () => {
-            recheck();
-          };
+          const reader = createFeedReader(publishFeedStatus);
+          feedReader = reader;
           // `navigator.connection` reports a Wi-Fi/cellular switch that leaves
           // the browser online; only a type change counts as a network switch.
           const networkSignature = () => connection === undefined
             ? ''
             : `${connection.type ?? ''}|${connection.effectiveType ?? ''}`;
           let lastNetwork = networkSignature();
+          // Network handlers preempt the reader: each one cancels the pending
+          // timer and aborts the in-flight read before the new state applies.
+          const onOffline = () => { reader.offline() };
+          const onOnline = () => { reader.online() };
           const onConnectionChange = () => {
             const next = networkSignature();
             if (next === lastNetwork) return;
             lastNetwork = next;
-            recheck();
+            reader.switched();
           };
           browser?.addEventListener?.('offline', onOffline);
           browser?.addEventListener?.('online', onOnline);
           connection?.addEventListener?.('change', onConnectionChange);
-          // Load-time connectivity check: refreshStatus skips the request when
-          // the browser already reports no network, and `online` resumes it.
-          refreshStatus();
+          // Load-time connectivity check: an offline reader sends nothing and
+          // publishes the fallback; `online` starts the first read.
+          reader.start();
           return () => {
-            reading = false;
-            clearTimeout(refreshTimer);
             browser?.removeEventListener?.('offline', onOffline);
             browser?.removeEventListener?.('online', onOnline);
             connection?.removeEventListener?.('change', onConnectionChange);
+            reader.stop();
+            if (feedReader === reader) feedReader = undefined;
           };
         }, 'dsh-status-sidebar: feed reads');
 
