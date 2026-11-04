@@ -21,6 +21,19 @@ window.__ModuleLoader__.load({
     /** Host route returning the newest `Status:` value from the RSS feed. */
     const FEED_ROUTE = 'api/status-sidebar.feed';
 
+    /**
+     * Development tracing switch. Every development branch keeps this `true`;
+     * the merge back to `main` restores `false`. Traces use `console.debug`,
+     * so they stay hidden unless the browser console enables that level.
+     */
+    const DEBUG = true;
+
+    /** Emit one structured trace record; `detail` may be a lazy thunk. */
+    function debugLog(event, detail) {
+      if (!DEBUG || typeof console === 'undefined' || typeof console.debug !== 'function') return;
+      console.debug(`[dsh-status-sidebar] ${event}`, typeof detail === 'function' ? detail() : detail);
+    }
+
     const DICTS = {
       en: {
         panel: 'Status',
@@ -194,6 +207,8 @@ window.__ModuleLoader__.load({
     /** Publish the settled status so a mounted glyph re-renders. */
     function publishFeedStatus(status) {
       feedStatus = status;
+      // Listener count separates "status never arrived" from "nothing mounted".
+      debugLog('status:publish', () => ({ status, listeners: feedListeners.size }));
       for (const listener of [...feedListeners]) listener();
     }
 
@@ -224,6 +239,7 @@ window.__ModuleLoader__.load({
         generation: 0,
         controller: undefined,
         timer: undefined,
+        nextDelayMs: undefined,
       };
 
       function publish(status) {
@@ -235,6 +251,7 @@ window.__ModuleLoader__.load({
       function clearTimer() {
         clearTimeout(state.timer);
         state.timer = undefined;
+        state.nextDelayMs = undefined;
       }
 
       /** Cancel the in-flight read; its generation check drops the result. */
@@ -248,6 +265,7 @@ window.__ModuleLoader__.load({
       function schedule(delay) {
         clearTimer();
         if (!state.reading || !state.online) return;
+        state.nextDelayMs = delay;
         state.timer = setTimeout(() => {
           state.timer = undefined;
           request();
@@ -264,6 +282,24 @@ window.__ModuleLoader__.load({
         schedule(delay);
       }
 
+      /** Everything a trace needs about the current link and poll state. */
+      function snapshot() {
+        const connection = typeof navigator === 'undefined' ? undefined : navigator.connection;
+        return {
+          navigatorOnline: !browserOffline(),
+          readerOnline: state.online,
+          reading: state.reading,
+          inflight: state.controller !== undefined,
+          status: state.status === undefined ? 'unread' : state.status,
+          retryIndex: state.retryIndex,
+          generation: state.generation,
+          nextDelayMs: state.nextDelayMs ?? null,
+          connection: connection === undefined
+            ? null
+            : { type: connection.type ?? null, effectiveType: connection.effectiveType ?? null },
+        };
+      }
+
       /** Read once; a concurrent trigger joins the in-flight read. */
       async function request() {
         if (!state.reading || state.controller !== undefined) return;
@@ -277,7 +313,9 @@ window.__ModuleLoader__.load({
         const generation = state.generation;
         const controller = new AbortController();
         state.controller = controller;
+        debugLog('read:start', () => ({ ...snapshot(), generation }));
         let status = null;
+        let result;
         try {
           const response = await fetch(FEED_ROUTE, {
             headers: { accept: 'application/json' },
@@ -286,28 +324,38 @@ window.__ModuleLoader__.load({
           });
           const body = response.ok ? await response.json() : null;
           status = typeof body?.status === 'string' ? body.status : null;
-        } catch {
+          result = { ok: response.ok, httpStatus: response.status, status };
+        } catch (error) {
           status = null;
+          result = { ok: false, error: error?.name ?? String(error) };
         }
         // A network transition took over while this read was in flight: the
         // result describes the old link and must not be published.
-        if (generation !== state.generation) return;
+        if (generation !== state.generation) {
+          debugLog('read:stale', () => ({ ...snapshot(), generation, result }));
+          return;
+        }
         state.controller = undefined;
         if (!state.reading) return;
+        let outcome;
         if (status === null) {
           // A failed read while the browser reports offline is a link-level
           // failure; show it and wait for `online` instead of retrying.
           if (browserOffline()) {
             markOffline();
-            return;
+            outcome = 'offline';
+          } else {
+            publish(null);
+            scheduleRetry();
+            outcome = 'unreachable';
           }
-          publish(null);
-          scheduleRetry();
-          return;
+        } else {
+          publish(status);
+          state.retryIndex = 0;
+          scheduleCadence();
+          outcome = 'ok';
         }
-        publish(status);
-        state.retryIndex = 0;
-        scheduleCadence();
+        debugLog('read:result', () => ({ ...snapshot(), outcome, result }));
       }
 
       /** No network: stop reading and show the unreadable status now. */
@@ -318,15 +366,17 @@ window.__ModuleLoader__.load({
         clearTimer();
         abortRead();
         publish(null);
+        debugLog('network:offline', () => snapshot());
       }
 
       /** A network switch: drop the old read and start over at once. */
-      function markOnline() {
+      function markOnline(reason) {
         state.generation += 1;
         state.online = true;
         state.retryIndex = 0;
         clearTimer();
         abortRead();
+        debugLog(`network:${reason}`, () => snapshot());
         request();
       }
 
@@ -361,7 +411,7 @@ window.__ModuleLoader__.load({
             markOffline();
             return;
           }
-          markOnline();
+          markOnline('online');
         },
         /** A `navigator.connection` type change, which may still be online. */
         switched() {
@@ -369,7 +419,7 @@ window.__ModuleLoader__.load({
             markOffline();
             return;
           }
-          markOnline();
+          markOnline('switch');
         },
       };
     }
@@ -423,6 +473,11 @@ window.__ModuleLoader__.load({
       const mark = typeof status === 'string' && Object.hasOwn(STATUS_GLYPHS, status)
         ? STATUS_GLYPHS[status]
         : FALLBACK_GLYPH;
+      // Confirms the glyph actually re-rendered with the new published status.
+      debugLog('icon:render', () => ({
+        status: typeof status === 'string' ? status : null,
+        glyph: mark.glyph,
+      }));
       return h(
         'svg',
         {

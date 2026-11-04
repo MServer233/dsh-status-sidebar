@@ -39,6 +39,22 @@ git tag -n
   重新载入后建议再刷新一次页面，让 Client 与新 Host 对齐。
 - 仅改 README/docs 不需要载入插件。
 
+## 诊断日志
+
+`client.js` 顶部的 `DEBUG` 是 Client 追踪日志的总开关，按分支生命周期管理：
+
+- 开发分支（`feat/*`、`fix/*`）保持 `DEBUG = true`；合并回 `main` 前改为 `false`。
+- 开启时，每次读取都会通过 `console.debug` 输出：
+  - `read:start`：请求发出前的网络与轮询快照；
+  - `read:result`：fetch 结果（HTTP 状态、`Status:` 值或错误）、当前网络与轮询状态、
+    下一次轮询间隔 `nextDelayMs`；
+  - `read:stale`：结果因网络切换被丢弃时的快照与原始结果；
+  - `network:offline` / `network:online` / `network:switch`：网络事件后的快照；
+  - `status:publish`：状态发布时的值与已订阅的图标数量；
+  - `icon:render`：图标组件实际渲染出的状态与图形。
+- 浏览器 console 默认可能隐藏 Debug/Verbose 级别；启用后可用 `[dsh-status-sidebar]` 过滤。
+- 该开关不需要写进 commit 信息。
+
 ## 测试
 
 刷新调度与网络时序有回归测试，直接运行：

@@ -97,7 +97,8 @@ function createHarness({ online = true } = {}) {
     },
     clearTimeout(id) { timers.delete(id) },
     AbortController,
-    console,
+    // Keep the tracing output out of the test report; `DSS_DEBUG=1` shows it.
+    console: process.env.DSS_DEBUG ? console : { debug() {} },
   };
   vm.createContext(sandbox);
   vm.runInContext(SOURCE, sandbox);
