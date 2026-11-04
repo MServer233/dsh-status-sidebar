@@ -184,6 +184,17 @@ window.__ModuleLoader__.load({
 
     let reading = true;
 
+    /**
+     * True while the browser reports no network. The timer pauses instead of
+     * retrying into a known-offline link, and the next `online` event resumes.
+     */
+    let networkDown = false;
+
+    /** Whether the browser currently reports no network at all. */
+    function browserOffline() {
+      return typeof navigator !== 'undefined' && navigator.onLine === false;
+    }
+
     /** Publish the settled status so a mounted glyph re-renders. */
     function publishFeedStatus(status) {
       feedStatus = status;
@@ -216,6 +227,17 @@ window.__ModuleLoader__.load({
         })
         .then(() => {
           refreshPromise = undefined;
+          if (!reading) return;
+          // A null status on an offline browser is a link-level failure: wait
+          // for `online` instead of retrying the unreachable route.
+          if (feedStatus === null && browserOffline()) {
+            networkDown = true;
+            clearTimeout(refreshTimer);
+            return;
+          }
+          // A readable feed means the route works even if the browser still
+          // reports no network (for example a loopback Host).
+          if (feedStatus !== null) networkDown = false;
           scheduleRefresh();
         });
       return refreshPromise;
@@ -361,10 +383,24 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => {
           reading = true;
+          const browser = typeof window === 'undefined' ? undefined : window;
+          const onOffline = () => {
+            networkDown = true;
+            clearTimeout(refreshTimer);
+          };
+          const onOnline = () => {
+            if (!networkDown) return;
+            networkDown = false;
+            refreshStatus();
+          };
+          browser?.addEventListener?.('offline', onOffline);
+          browser?.addEventListener?.('online', onOnline);
           refreshStatus();
           return () => {
             reading = false;
             clearTimeout(refreshTimer);
+            browser?.removeEventListener?.('offline', onOffline);
+            browser?.removeEventListener?.('online', onOnline);
           };
         }, 'dsh-status-sidebar: feed reads');
 
