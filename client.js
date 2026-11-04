@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
      * the merge back to `main` restores `false`. Traces use `console.debug`,
      * so they stay hidden unless the browser console enables that level.
      */
-    const DEBUG = true;
+    const DEBUG = false;
 
     /** Emit one structured trace record; `detail` may be a lazy thunk. */
     function debugLog(event, detail) {
