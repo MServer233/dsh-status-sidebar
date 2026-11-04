@@ -24,9 +24,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function createHarness({ online = true } = {}) {
   const timers = new Map();
+  const intervals = new Map();
   const windowListeners = new Map();
   const connectionListeners = new Set();
   const reads = [];
+  const probes = [];
   const connection = {
     type: 'wifi',
     effectiveType: '4g',
@@ -39,6 +41,7 @@ function createHarness({ online = true } = {}) {
   };
   const navigator = { onLine: online, connection };
   let timerSeq = 0;
+  let intervalSeq = 0;
   let definition;
   let iconComponent;
   let stateUpdates = 0;
@@ -65,11 +68,12 @@ function createHarness({ online = true } = {}) {
   function fakeFetch(url, init) {
     const read = { url, init, aborted: false };
     read.promise = new Promise((resolve, reject) => {
-      read.succeed = body => resolve({ ok: true, json: async () => body });
+      read.succeed = body => resolve({ ok: true, status: 200, json: async () => body });
+      read.failStatus = status => resolve({ ok: false, status, json: async () => ({}) });
       read.fail = () => reject(new Error('network down'));
     });
     init.signal?.addEventListener?.('abort', () => { read.aborted = true });
-    reads.push(read);
+    (url === 'api/status-sidebar.probe' ? probes : reads).push(read);
     return read.promise;
   }
 
@@ -96,6 +100,12 @@ function createHarness({ online = true } = {}) {
       return id;
     },
     clearTimeout(id) { timers.delete(id) },
+    setInterval(fn, period) {
+      const id = ++intervalSeq;
+      intervals.set(id, { fn, period });
+      return id;
+    },
+    clearInterval(id) { intervals.delete(id) },
     AbortController,
     // Keep the tracing output out of the test report; `DSS_DEBUG=1` shows it.
     console: process.env.DSS_DEBUG ? console : { debug() {} },
@@ -131,6 +141,7 @@ function createHarness({ online = true } = {}) {
 
   return {
     reads,
+    probes,
     /** Render the glyph and read the stroke of its SVG. */
     glyph() {
       const tree = iconComponent({ size: 16, useSessions: undefined });
@@ -157,6 +168,14 @@ function createHarness({ online = true } = {}) {
     },
     timerDelays() {
       return [...timers.values()].map(timer => timer.delay);
+    },
+    probeIntervals() {
+      return [...intervals.values()].map(interval => interval.period);
+    },
+    fireProbe() {
+      const next = intervals.entries().next();
+      assert.equal(next.done, false, 'a probe interval is armed');
+      next.value[1].fn();
     },
     runTimer() {
       const next = timers.entries().next();
@@ -281,15 +300,106 @@ test('a connection type switch preempts the read and drops its result', async ()
   assert.equal(hs.glyph().shape, 'circle line line');
 });
 
+test('a failed Host probe goes offline while navigator still reports online', async () => {
+  const hs = createHarness();
+  hs.reads[0].succeed({ status: 'resolved' });
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+
+  // A healthy probe only confirms reachability; it does not read the feed.
+  hs.fireProbe();
+  hs.probes[0].succeed({ reachable: true });
+  await flush();
+  assert.equal(hs.reads.length, 1);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+
+  hs.fireProbe();
+  hs.probes[1].succeed({ reachable: false });
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.deepEqual(hs.probeIntervals(), [5000]);
+
+  // Recovery also works through the probe, without an `online` event.
+  hs.fireProbe();
+  hs.probes[2].succeed({ reachable: true });
+  await flush();
+  assert.equal(hs.reads.length, 2);
+  hs.reads[1].succeed({ status: 'ongoing' });
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+});
+
+test('a failed probe aborts the read already in flight', async () => {
+  const hs = createHarness();
+  hs.reads[0].succeed({ status: 'resolved' });
+  await flush();
+  hs.runTimer();
+  assert.equal(hs.reads.length, 2);
+
+  hs.fireProbe();
+  hs.probes[0].succeed({ reachable: false });
+  await flush();
+  assert.equal(hs.reads[1].aborted, true);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.deepEqual(hs.probeIntervals(), [5000]);
+});
+
+test('a reachable Host probe restores an offline page load without an online event', async () => {
+  const hs = createHarness({ online: false });
+  assert.equal(hs.reads.length, 0);
+  assert.equal(hs.probes.length, 1);
+
+  hs.probes[0].succeed({ reachable: true });
+  await flush();
+  assert.equal(hs.reads.length, 1);
+  hs.reads[0].succeed({ status: 'scheduled' });
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.yellow);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+});
+
+test('a stale probe failure cannot undo a newer online transition', async () => {
+  const hs = createHarness({ online: false });
+  assert.equal(hs.probes.length, 1);
+
+  hs.goOnline();
+  assert.equal(hs.reads.length, 1);
+  assert.equal(hs.probes.length, 2);
+
+  // The offline probe answers after the transition; its answer is stale.
+  hs.probes[0].succeed({ reachable: false });
+  await flush();
+  hs.reads[0].succeed({ status: 'resolved' });
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+});
+
+test('a missing probe route is not mistaken for a dead network', async () => {
+  const hs = createHarness();
+  hs.reads[0].succeed({ status: 'resolved' });
+  await flush();
+
+  hs.fireProbe();
+  hs.probes[0].failStatus(404);
+  await flush();
+  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
+});
+
 test('cleanup removes listeners, timers, and the in-flight read', async () => {
   const hs = createHarness();
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
   assert.deepEqual(hs.timerDelays(), [600000]);
+  assert.deepEqual(hs.probeIntervals(), [15000]);
   assert.deepEqual(hs.listenerCounts(), { window: 2, connection: 1 });
 
   hs.cleanup();
   assert.deepEqual(hs.timerDelays(), []);
+  assert.deepEqual(hs.probeIntervals(), []);
   assert.deepEqual(hs.listenerCounts(), { window: 0, connection: 0 });
 
   hs.goOffline();

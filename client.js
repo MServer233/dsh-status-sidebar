@@ -20,6 +20,8 @@ window.__ModuleLoader__.load({
     const STATUS_URL = 'https://status.deepseek.com';
     /** Host route returning the newest `Status:` value from the RSS feed. */
     const FEED_ROUTE = 'api/status-sidebar.feed';
+    /** Host route reporting whether the Host itself can reach the feed host. */
+    const PROBE_ROUTE = 'api/status-sidebar.probe';
 
     /**
      * Development tracing switch. Every development branch keeps this `true`;
@@ -187,6 +189,15 @@ window.__ModuleLoader__.load({
      * feed: 5s, 10s, 10s, 30s, then one minute for every later attempt.
      */
     const RETRY_DELAYS_MS = [5 * 1000, 10 * 1000, 10 * 1000, 30 * 1000, 60 * 1000];
+    /**
+     * Reachability heartbeat. Browser `online`/`offline` events are unreliable
+     * behind virtual adapters: the browser can stay "online" after the real link
+     * is gone. The Host is therefore asked directly, and its answer drives the
+     * offline/online transition of the glyph.
+     */
+    const PROBE_HEALTHY_MS = 15 * 1000;
+    /** Probe faster while the feed host is unreachable, to recover promptly. */
+    const PROBE_OFFLINE_MS = 5 * 1000;
 
     /**
      * Newest status from the latest read: undefined until the first read
@@ -225,10 +236,12 @@ window.__ModuleLoader__.load({
      *      glyph stops showing the last incident at once instead of waiting
      *      for a request that will never be sent.
      *   3. Coming back online reads immediately and restarts the backoff.
+     *   4. A periodic Host probe, not `navigator.onLine`, is the authority on
+     *      whether the link is gone; browser events only speed the transition.
      *
      * `generation` is the ordering token: it advances on each network
      * transition, and a read applies its result only while its own generation
-     * is still current.
+     * is still current. Probes carry a second, independent token.
      */
     function createFeedReader(onStatus) {
       const state = {
@@ -240,6 +253,11 @@ window.__ModuleLoader__.load({
         controller: undefined,
         timer: undefined,
         nextDelayMs: undefined,
+        probeTimer: undefined,
+        probePeriod: undefined,
+        probeController: undefined,
+        probeGeneration: 0,
+        probing: false,
       };
 
       function publish(status) {
@@ -282,6 +300,98 @@ window.__ModuleLoader__.load({
         schedule(delay);
       }
 
+      /** Re-arm the reachability heartbeat when its period changes. */
+      function armProbe(period) {
+        if (state.probeTimer !== undefined && state.probePeriod === period) return;
+        clearInterval(state.probeTimer);
+        state.probeTimer = undefined;
+        state.probePeriod = period;
+        if (!state.reading) return;
+        state.probeTimer = setInterval(() => { probeNow(); }, period);
+      }
+
+      /** Abort the in-flight probe; its generation check drops the result. */
+      function abortProbe() {
+        state.probeGeneration += 1;
+        if (state.probeController !== undefined) {
+          state.probeController.abort();
+          state.probeController = undefined;
+        }
+        state.probing = false;
+      }
+
+      function stopProbe() {
+        clearInterval(state.probeTimer);
+        state.probeTimer = undefined;
+        state.probePeriod = undefined;
+        abortProbe();
+      }
+
+      /**
+       * Ask the Host whether it can reach the feed host. This is the only path
+       * back from offline: navigator events may never arrive behind a virtual
+       * adapter, while the Host sees the real egress failure.
+       */
+      async function probeNow() {
+        if (!state.reading || state.probing) return;
+        state.probing = true;
+        const probeGeneration = state.probeGeneration;
+        const controller = new AbortController();
+        state.probeController = controller;
+        const startedAt = Date.now();
+        let outcome = 'unreachable';
+        try {
+          const response = await fetch(PROBE_ROUTE, {
+            headers: { accept: 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          if (response.ok) {
+            try {
+              const body = await response.json();
+              outcome = body?.reachable === true
+                ? 'reachable'
+                : body?.reachable === false ? 'unreachable' : 'unavailable';
+            } catch {
+              outcome = 'unavailable';
+            }
+          } else {
+            // A missing/older probe route must not look like a dead network.
+            outcome = 'unavailable';
+          }
+        } catch {
+          outcome = 'unreachable';
+        }
+        // A network transition fired while this probe was in flight; its
+        // answer describes the old link, so it must not move the reader.
+        if (probeGeneration !== state.probeGeneration) return;
+        state.probing = false;
+        state.probeController = undefined;
+        if (!state.reading) return;
+        if (outcome === 'reachable') {
+          if (state.online) {
+            armProbe(PROBE_HEALTHY_MS);
+          } else {
+            markOnline('probe');
+          }
+        } else if (outcome === 'unreachable') {
+          if (state.online) {
+            markOffline('unreachable');
+          } else {
+            armProbe(PROBE_OFFLINE_MS);
+          }
+        } else {
+          // Keep polling; a Host reload can add the route later.
+          armProbe(state.online ? PROBE_HEALTHY_MS : PROBE_OFFLINE_MS);
+        }
+        debugLog('probe:result', () => ({
+          ...snapshot(),
+          outcome,
+          elapsedMs: Date.now() - startedAt,
+        }));
+      }
+
       /** Everything a trace needs about the current link and poll state. */
       function snapshot() {
         const connection = typeof navigator === 'undefined' ? undefined : navigator.connection;
@@ -290,10 +400,12 @@ window.__ModuleLoader__.load({
           readerOnline: state.online,
           reading: state.reading,
           inflight: state.controller !== undefined,
+          probing: state.probing,
           status: state.status === undefined ? 'unread' : state.status,
           retryIndex: state.retryIndex,
           generation: state.generation,
           nextDelayMs: state.nextDelayMs ?? null,
+          probePeriodMs: state.probePeriod ?? null,
           connection: connection === undefined
             ? null
             : { type: connection.type ?? null, effectiveType: connection.effectiveType ?? null },
@@ -303,12 +415,8 @@ window.__ModuleLoader__.load({
       /** Read once; a concurrent trigger joins the in-flight read. */
       async function request() {
         if (!state.reading || state.controller !== undefined) return;
-        // A network transition may have fired after the timer was armed.
-        if (browserOffline()) {
-          markOffline();
-          return;
-        }
-        state.online = true;
+        // Offline is owned by the probe/network handlers, not re-derived here.
+        if (!state.online) return;
         clearTimer();
         const generation = state.generation;
         const controller = new AbortController();
@@ -339,16 +447,11 @@ window.__ModuleLoader__.load({
         if (!state.reading) return;
         let outcome;
         if (status === null) {
-          // A failed read while the browser reports offline is a link-level
-          // failure; show it and wait for `online` instead of retrying.
-          if (browserOffline()) {
-            markOffline();
-            outcome = 'offline';
-          } else {
-            publish(null);
-            scheduleRetry();
-            outcome = 'unreachable';
-          }
+          // The Host answered but could not read the feed: keep retrying while
+          // the reachability probe says the network is still up.
+          publish(null);
+          scheduleRetry();
+          outcome = 'unreachable';
         } else {
           publish(status);
           state.retryIndex = 0;
@@ -358,24 +461,29 @@ window.__ModuleLoader__.load({
         debugLog('read:result', () => ({ ...snapshot(), outcome, result }));
       }
 
-      /** No network: stop reading and show the unreadable status now. */
-      function markOffline() {
+      /** No network: stop reading, show the fallback, and probe for recovery. */
+      function markOffline(reason) {
+        const wasOnline = state.online;
         state.generation += 1;
         state.online = false;
         state.retryIndex = 0;
         clearTimer();
         abortRead();
+        abortProbe();
         publish(null);
-        debugLog('network:offline', () => snapshot());
+        armProbe(PROBE_OFFLINE_MS);
+        if (wasOnline) debugLog(`network:${reason}`, () => snapshot());
       }
 
-      /** A network switch: drop the old read and start over at once. */
+      /** Reachable again: drop stale work, read at once, and probe less often. */
       function markOnline(reason) {
         state.generation += 1;
         state.online = true;
         state.retryIndex = 0;
         clearTimer();
         abortRead();
+        abortProbe();
+        armProbe(PROBE_HEALTHY_MS);
         debugLog(`network:${reason}`, () => snapshot());
         request();
       }
@@ -384,42 +492,48 @@ window.__ModuleLoader__.load({
         start() {
           state.reading = true;
           if (browserOffline()) {
-            markOffline();
+            // The event may already have fired before mount; the probe confirms.
+            markOffline('offline');
+            debugLog('network:offline', () => snapshot());
+            probeNow();
             return;
           }
+          armProbe(PROBE_HEALTHY_MS);
           request();
         },
         stop() {
           state.reading = false;
           clearTimer();
           abortRead();
+          stopProbe();
         },
         /** A new turn or the reader's own timer asks for a read. */
         refresh() {
-          if (!state.reading) return;
-          if (browserOffline()) {
-            markOffline();
-            return;
-          }
+          if (!state.reading || !state.online) return;
           request();
         },
         offline() {
-          markOffline();
+          markOffline('offline');
+          probeNow();
         },
         online() {
           if (browserOffline()) {
-            markOffline();
+            markOffline('offline');
+            probeNow();
             return;
           }
           markOnline('online');
+          probeNow();
         },
         /** A `navigator.connection` type change, which may still be online. */
         switched() {
           if (browserOffline()) {
-            markOffline();
+            markOffline('unreachable');
+            probeNow();
             return;
           }
           markOnline('switch');
+          probeNow();
         },
       };
     }

@@ -49,7 +49,9 @@ git tag -n
   - `read:result`：fetch 结果（HTTP 状态、`Status:` 值或错误）、当前网络与轮询状态、
     下一次轮询间隔 `nextDelayMs`；
   - `read:stale`：结果因网络切换被丢弃时的快照与原始结果；
-  - `network:offline` / `network:online` / `network:switch`：网络事件后的快照；
+  - `probe:result`：探测结果 `reachable` / `unreachable` / `unavailable`、耗时与当前轮询状态；
+  - `network:offline` / `network:online` / `network:switch` / `network:unreachable` /
+    `network:probe`：网络状态切换后的快照；
   - `status:publish`：状态发布时的值与已订阅的图标数量；
   - `icon:render`：图标组件实际渲染出的状态与图形。
 - 浏览器 console 默认可能隐藏 Debug/Verbose 级别；启用后可用 `[dsh-status-sidebar]` 过滤。
@@ -72,8 +74,12 @@ node --test test/
 - 离线载入零请求、`online` 恢复；
 - 在线不可达时 5s/10s/10s/30s/1min/1min 退避；
 - 断网瞬间发布回退图标、中止在途读取、丢弃迟到结果；
+- 主动探测：`navigator.onLine` 仍为 true 时由 Host 探测切到离线、恢复后重读、探测失败中止
+  在途读取、旧探测结果不覆盖新状态、探测路由缺失不误报；
 - `online` 与 `navigator.connection` 类型切换立即重读并重置退避；
-- 卸载移除监听器、定时器与在途读取。
+- 卸载移除监听器、两类定时器与在途读取。
+
+`test/probe-route.test.mjs` 覆盖 Host 探测路由的 HEAD 请求、`reachable` 分支与 `no-store`。
 
 其余验证仍使用临时 Node 脚本：
 
@@ -92,5 +98,7 @@ node --test test/
 - `feed.rss` 没有 `Access-Control-Allow-Origin`，浏览器不能直接读取，必须经 Host 路由。
 - 面板可见性受浏览器/网络影响；若状态页长时间空白，请检查本机能否直接访问该站点。
 - 视觉渲染需在运行中的 Web GUI 中人工确认；本环境没有浏览器截图能力。
-- 真实网络切换（不同 Wi-Fi、Wi-Fi ↔ 蜂窝）无法在本环境复现，网络行为通过模拟浏览器事件
-  与不同 fetch 结果验证；同类型 Wi-Fi 之间切换可能不产生事件，最坏按 1 分钟档恢复。
+- 真实网络切换（不同 Wi-Fi、Wi-Fi ↔ 蜂窝、虚拟网卡断网）无法在本环境复现，网络行为通过
+  模拟事件、假定时器与不同 fetch 结果验证。
+- 主动探测的检测延迟约一个探测周期加 HEAD 超时（正常 15s + 3s，离线恢复 5s），不是即时；
+  调整 `PROBE_HEALTHY_MS` / `PROBE_OFFLINE_MS` 可改变延迟与请求量。

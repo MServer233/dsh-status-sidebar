@@ -15,6 +15,12 @@ export const FEED_PATH = '/api/status-sidebar.feed';
 /** Browser-relative form of {@link FEED_PATH}; the document base is the app root. */
 export const FEED_ROUTE = FEED_PATH.slice(1);
 
+/** Exact Host route reporting whether the feed host is reachable at all. */
+export const PROBE_PATH = '/api/status-sidebar.probe';
+
+/** Browser-relative form of {@link PROBE_PATH}; the document base is the app root. */
+export const PROBE_ROUTE = PROBE_PATH.slice(1);
+
 /** First `<item>` of the channel: the feed is newest-first. */
 const FIRST_ITEM = /<item\b[^>]*>([\s\S]*?)<\/item>/i;
 
