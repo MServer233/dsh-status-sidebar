@@ -223,7 +223,12 @@ window.__ModuleLoader__.load({
     function refreshStatus() {
       if (refreshPromise !== undefined) return refreshPromise;
       clearTimeout(refreshTimer);
-      const startedOffline = browserOffline();
+      // A known-offline link gets no request at all; the `online` listener
+      // resumes the normal read path.
+      if (browserOffline()) {
+        networkDown = true;
+        return Promise.resolve();
+      }
       refreshPromise = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
         .then(response => (response.ok ? response.json() : null))
         .then((body) => {
@@ -244,10 +249,9 @@ window.__ModuleLoader__.load({
               clearTimeout(refreshTimer);
               return;
             }
-            // The link returned while this read was in flight (or the read
-            // started on the dead link), so its null result is stale: read
-            // again immediately instead of waiting for the next cadence.
-            if (startedOffline || pendingOnlineRefresh) {
+            // The link returned while this read was in flight, so its null
+            // result is stale: read again immediately.
+            if (pendingOnlineRefresh) {
               pendingOnlineRefresh = false;
               networkDown = false;
               refreshStatus();
@@ -423,6 +427,8 @@ window.__ModuleLoader__.load({
           };
           browser?.addEventListener?.('offline', onOffline);
           browser?.addEventListener?.('online', onOnline);
+          // Load-time connectivity check: refreshStatus skips the request when
+          // the browser already reports no network, and `online` resumes it.
           refreshStatus();
           return () => {
             reading = false;
