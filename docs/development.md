@@ -41,7 +41,25 @@ git tag -n
 
 ## 测试
 
-仓库不包含测试脚本，验证使用临时 Node 脚本完成，覆盖：
+刷新调度与网络时序有回归测试，直接运行：
+
+```bash
+cd /home/qwq/dsh-workshop/dsh-status-sidebar
+node --test test/
+```
+
+`test/feed-schedule.test.mjs` 在 VM 中注入假定时器、假 `fetch`、假网络事件与 React 桩，
+覆盖：
+
+- 载入读取、10 分钟 / 1 分钟排程；
+- 新一轮对话触发、subagent 忽略、并发合并；
+- 离线载入零请求、`online` 恢复；
+- 在线不可达时 5s/10s/10s/30s/1min/1min 退避；
+- 断网瞬间发布回退图标、中止在途读取、丢弃迟到结果；
+- `online` 与 `navigator.connection` 类型切换立即重读并重置退避；
+- 卸载移除监听器、定时器与在途读取。
+
+其余验证仍使用临时 Node 脚本：
 
 1. **RSS 解析**：对实时 feed 与 7 种状态样例、原始/转义 HTML、大小写、多空格、缺失
    item/description/Status、数字实体解码逐项断言。
@@ -50,13 +68,6 @@ git tag -n
    路由撤销。
 3. **图标映射**：在 React 桩环境中渲染组件，验证状态 → 图形/颜色 token/尺寸/线宽，以及
    读取失败时的 `activity` 回退。
-4. **刷新调度**：同一桩环境配合假定时器与假网络事件，验证：
-   - 载入读取、10 分钟 / 1 分钟排程；
-   - 新一轮对话触发、subagent 忽略、并发合并；
-   - 离线载入零请求、`online` 恢复；
-   - 在线不可达时 5s/10s/10s/30s/1min/1min 退避；
-   - `online` 与 `navigator.connection` 类型切换立即重读并重置退避；
-   - 卸载移除监听器与定时器。
 
 ## 验证与限制
 

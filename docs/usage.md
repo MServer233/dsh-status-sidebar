@@ -15,7 +15,7 @@
 | `investigating`、`identified`、`monitoring` | `circle-alert` | 红 |
 | `ongoing` | `clock-alert` | 红 |
 | `scheduled` | `clock` | 黄 |
-| 其他值、尚未读取或读取失败 | `activity` | 主题主墨色（深色主题下为白） |
+| 其他值、尚未读取、读取失败或断网 | `activity` | 主题主墨色（深色主题下为白） |
 
 - 颜色取自宿主主题 token：`--dsw-alias-state-success-primary`、`--dsw-alias-state-error-primary`、
   `--dsw-alias-state-warn-primary`；回退图标使用 `currentColor`。
@@ -29,9 +29,10 @@
   - `resolved` / `completed`：每 10 分钟。
   - 其他可读状态：每 1 分钟。
 - **在线但 feed 不可达**：按 `5s → 10s → 10s → 30s → 1min → 1min…` 的间隔再确认。
-- **网络切换**：`online` / `offline` 事件，以及 `navigator.connection` 的
-  `type`/`effectiveType` 变化都会重新检测；在线切换立即读取并从 5s 重置退避，离线切换暂停读取。
-- 读取途中网络闪断又恢复时，会在该次读取结束后立即重读，避免把旧请求的失败结果当成恢复后的状态。
+- **断网**：`offline` 事件立即把图标切回 `activity`，同时取消定时器并中止在途读取；
+  断网前的状态不会再显示，离线期间也不发出任何 feed 请求。
+- **恢复在线 / 换网**：`online` 事件，以及 `navigator.connection` 的 `type`/`effectiveType`
+  变化都会立即重读并从 5s 重置退避；在途读取会被丢弃，旧链路的结果不会覆盖新状态。
 
 ## 安装与卸载
 

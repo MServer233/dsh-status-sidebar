@@ -8,7 +8,7 @@
 | `cordis.patch.yml` | 向 profile 插入 `dsh-status-sidebar` 一行插件 |
 | `index.js` | Host 半侧：注册 `/api/status-sidebar.feed`，读取并解析状态 RSS |
 | `feed.js` | Host 半侧：抓取 RSS、解码 XML 实体并提取最新 `<item>` 的 `Status:` 值 |
-| `client.js` | Client 半侧：注册 `main` 面板与 `sidebar.panellist` 入口，按状态绘制图标 |
+| `client.js` | Client 半侧：注册 `main` 面板与 `sidebar.panellist` 入口；内置唯一的状态读取调度器，按状态绘制图标 |
 | `locale/en.json`、`locale/zh.json` | 插件管理页显示用的标题与说明 |
 | `icon.svg` | 插件管理页图标（本仓库原创的脉冲折线图形） |
 
@@ -56,30 +56,48 @@
 
 ## 刷新与网络策略（Client）
 
+### 单一调度器
+
+`client.js` 中的 `createFeedReader` 是唯一决定“何时读取”的地方。页面载入、新一轮对话、定时、
+退避与网络事件都通过它，组件不直接持有定时器或网络标志：
+
+- `start()` / `stop()`：绑定与卸载。
+- `refresh()`：新一轮对话和定时器请求读取；与在途读取合并。
+- `offline()` / `online()` / `switched()`：网络事件入口。
+
+调度器维护 `generation`：每次网络切换递增；读取开始时记录当时的 `generation`，结束后只有
+仍相等才发布结果。配合 `AbortController`，网络事件可以中止在途请求并立即按新状态行动，
+不会被旧请求的迟到结果覆盖。
+
 ### 触发
 
-- **页面载入**：`apply()` 的 `ctx.effect` 注册监听器后调用 `refreshStatus()`。
+- **页面载入**：`start()`；浏览器已离线时零请求，只发布回退状态。
 - **新一轮对话**：`useSessions` 选择器返回“非 subagent 且 `running` 为 true”的会话 id 集合；
-  集合中出现新 id（即上一轮结束后重新开始）时立即 `refreshStatus()`。subagent 轮次被忽略。
+  集合中出现新 id（即上一轮结束后重新开始）时调用 `refresh()`。subagent 轮次被忽略。
 - **定时**：读取成功后，`resolved`/`completed` 排 10 分钟，其他可读状态排 1 分钟。
 - **在线但不可达**：读取结果为 `null` 且浏览器在线时，按
   `5s → 10s → 10s → 30s → 1min → 1min…` 退避；成功或网络切换会重置序列。
 
-### 连通性
+### 网络事件的优先级
 
-- 页面载入与每次读取前检查 `navigator.onLine`；离线时不发出任何 feed 请求。
-- 监听 `online` / `offline`：
-  - `offline`：标记断网、清空定时器、暂停读取。
-  - `online`：立即重新检测并读取，重置退避。
-- 监听 `navigator.connection` 的 `change`，按 `type`/`effectiveType` 组成签名；只有签名变化
-  （真正的换网，而非仅带宽波动）才立即重读并重置退避。
-- 若网络切换时仍有读取在途，标记 `pendingOnlineRefresh`，在该次读取结束后立即重读，
-  避免旧请求的失败结果结束新一轮检测。
+网络事件优先于任何已排程或进行中的读取：
+
+1. `offline`：递增 `generation`、清空定时器、中止在途读取，并**立即发布 `null`**。图标马上
+   回退为 `activity`，不再显示断网前的状态；离线期间不发起请求。
+2. `online`：递增 `generation`、重置退避、中止在途读取，并立即发起新读取。
+3. `navigator.connection` 的 `change`：仅当 `type`/`effectiveType` 签名变化（真正的换网，
+   而非带宽波动）时按 `online` 处理，即使浏览器仍报告在线。
+4. 读取结果晚于网络切换到达（包括 abort 未生效的传输）：`generation` 不相等，结果被丢弃。
+
+### 连通性检查
+
+- 每次发起请求前检查 `navigator.onLine`；离线时走 `offline` 分支，不发请求。
+- 读取失败且浏览器已离线：发布 `null` 并等待 `online`，不继续退避。
 
 ### 其他
 
-- 并发调用共享同一个 in-flight 读取；读取完成后统一重新排程。
-- 插件卸载时移除 `online`/`offline`/`connection` 监听器并清空定时器。
+- 并发触发共享当前在途读取；读取完成后统一重新排程。
+- 插件卸载时移除 `online`/`offline`/`connection` 监听器、清空定时器并中止在途读取。
 
 ## 图标
 
