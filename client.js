@@ -167,8 +167,13 @@ window.__ModuleLoader__.load({
     const NORMAL_STATUSES = new Set(['resolved', 'completed']);
     /** Refresh cadence while the newest incident is resolved or completed. */
     const NORMAL_REFRESH_MS = 10 * 60 * 1000;
-    /** Refresh cadence for an active incident, an unknown status, or a failed read. */
+    /** Refresh cadence for an active incident or an unknown status. */
     const ALERT_REFRESH_MS = 60 * 1000;
+    /**
+     * Re-confirmation delays after an online read that could not reach the
+     * feed: 5s, 10s, 10s, 30s, then one minute for every later attempt.
+     */
+    const RETRY_DELAYS_MS = [5 * 1000, 10 * 1000, 10 * 1000, 30 * 1000, 60 * 1000];
 
     /**
      * Newest status from the latest read: undefined until the first read
@@ -190,6 +195,9 @@ window.__ModuleLoader__.load({
      */
     let networkDown = false;
 
+    /** Position in {@link RETRY_DELAYS_MS}; reset by a success or a network switch. */
+    let retryIndex = 0;
+
     /**
      * Set when `online` arrives while a read is in flight: that read may have
      * started on the dead link, so its result cannot end the outage.
@@ -207,13 +215,24 @@ window.__ModuleLoader__.load({
       for (const listener of [...feedListeners]) listener();
     }
 
-    /** Re-arm the read at the cadence the latest status implies. */
+    /** Re-arm the read at the cadence the readable status implies. */
     function scheduleRefresh() {
       if (!reading) return;
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         refreshStatus();
       }, NORMAL_STATUSES.has(feedStatus) ? NORMAL_REFRESH_MS : ALERT_REFRESH_MS);
+    }
+
+    /** Re-confirm a feed the browser claims to be online for, backing off. */
+    function scheduleRetry() {
+      if (!reading) return;
+      clearTimeout(refreshTimer);
+      const delay = RETRY_DELAYS_MS[Math.min(retryIndex, RETRY_DELAYS_MS.length - 1)];
+      retryIndex += 1;
+      refreshTimer = setTimeout(() => {
+        refreshStatus();
+      }, delay);
     }
 
     /**
@@ -257,13 +276,14 @@ window.__ModuleLoader__.load({
               refreshStatus();
               return;
             }
-            scheduleRefresh();
+            scheduleRetry();
             return;
           }
           // A readable feed means the route works even if the browser still
           // reports no network (for example a loopback Host).
           networkDown = false;
           pendingOnlineRefresh = false;
+          retryIndex = 0;
           scheduleRefresh();
         });
       return refreshPromise;
@@ -410,23 +430,41 @@ window.__ModuleLoader__.load({
         ctx.effect(() => {
           reading = true;
           const browser = typeof window === 'undefined' ? undefined : window;
+          const connection = typeof navigator === 'undefined' ? undefined : navigator.connection;
+          // Every network switch re-checks immediately: the new link may have
+          // different reachability, so the backoff restarts from the first step.
+          const recheck = () => {
+            networkDown = browserOffline();
+            retryIndex = 0;
+            clearTimeout(refreshTimer);
+            if (refreshPromise !== undefined) {
+              pendingOnlineRefresh = true;
+              return;
+            }
+            refreshStatus();
+          };
           const onOffline = () => {
             networkDown = true;
             clearTimeout(refreshTimer);
           };
           const onOnline = () => {
-            const wasDown = networkDown;
-            networkDown = false;
-            // A read still in flight may have been issued on the dead link;
-            // re-read as soon as it settles.
-            if (refreshPromise !== undefined) {
-              pendingOnlineRefresh = true;
-              return;
-            }
-            if (wasDown || feedStatus === null || feedStatus === undefined) refreshStatus();
+            recheck();
+          };
+          // `navigator.connection` reports a Wi-Fi/cellular switch that leaves
+          // the browser online; only a type change counts as a network switch.
+          const networkSignature = () => connection === undefined
+            ? ''
+            : `${connection.type ?? ''}|${connection.effectiveType ?? ''}`;
+          let lastNetwork = networkSignature();
+          const onConnectionChange = () => {
+            const next = networkSignature();
+            if (next === lastNetwork) return;
+            lastNetwork = next;
+            recheck();
           };
           browser?.addEventListener?.('offline', onOffline);
           browser?.addEventListener?.('online', onOnline);
+          connection?.addEventListener?.('change', onConnectionChange);
           // Load-time connectivity check: refreshStatus skips the request when
           // the browser already reports no network, and `online` resumes it.
           refreshStatus();
@@ -435,6 +473,7 @@ window.__ModuleLoader__.load({
             clearTimeout(refreshTimer);
             browser?.removeEventListener?.('offline', onOffline);
             browser?.removeEventListener?.('online', onOnline);
+            connection?.removeEventListener?.('change', onConnectionChange);
           };
         }, 'dsh-status-sidebar: feed reads');
 
