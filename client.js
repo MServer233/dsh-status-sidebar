@@ -190,6 +190,12 @@ window.__ModuleLoader__.load({
      */
     let networkDown = false;
 
+    /**
+     * Set when `online` arrives while a read is in flight: that read may have
+     * started on the dead link, so its result cannot end the outage.
+     */
+    let pendingOnlineRefresh = false;
+
     /** Whether the browser currently reports no network at all. */
     function browserOffline() {
       return typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -217,6 +223,7 @@ window.__ModuleLoader__.load({
     function refreshStatus() {
       if (refreshPromise !== undefined) return refreshPromise;
       clearTimeout(refreshTimer);
+      const startedOffline = browserOffline();
       refreshPromise = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
         .then(response => (response.ok ? response.json() : null))
         .then((body) => {
@@ -228,16 +235,31 @@ window.__ModuleLoader__.load({
         .then(() => {
           refreshPromise = undefined;
           if (!reading) return;
-          // A null status on an offline browser is a link-level failure: wait
-          // for `online` instead of retrying the unreachable route.
-          if (feedStatus === null && browserOffline()) {
-            networkDown = true;
-            clearTimeout(refreshTimer);
+          if (feedStatus === null) {
+            // A null status while the browser reports offline is a link-level
+            // failure: wait for `online` instead of retrying the dead route.
+            if (browserOffline()) {
+              networkDown = true;
+              pendingOnlineRefresh = false;
+              clearTimeout(refreshTimer);
+              return;
+            }
+            // The link returned while this read was in flight (or the read
+            // started on the dead link), so its null result is stale: read
+            // again immediately instead of waiting for the next cadence.
+            if (startedOffline || pendingOnlineRefresh) {
+              pendingOnlineRefresh = false;
+              networkDown = false;
+              refreshStatus();
+              return;
+            }
+            scheduleRefresh();
             return;
           }
           // A readable feed means the route works even if the browser still
           // reports no network (for example a loopback Host).
-          if (feedStatus !== null) networkDown = false;
+          networkDown = false;
+          pendingOnlineRefresh = false;
           scheduleRefresh();
         });
       return refreshPromise;
@@ -389,9 +411,15 @@ window.__ModuleLoader__.load({
             clearTimeout(refreshTimer);
           };
           const onOnline = () => {
-            if (!networkDown) return;
+            const wasDown = networkDown;
             networkDown = false;
-            refreshStatus();
+            // A read still in flight may have been issued on the dead link;
+            // re-read as soon as it settles.
+            if (refreshPromise !== undefined) {
+              pendingOnlineRefresh = true;
+              return;
+            }
+            if (wasDown || feedStatus === null || feedStatus === undefined) refreshStatus();
           };
           browser?.addEventListener?.('offline', onOffline);
           browser?.addEventListener?.('online', onOnline);
