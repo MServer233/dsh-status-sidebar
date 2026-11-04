@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Sidebar panel that embeds the DeepSeek service status page and mirrors the newest incident status in its icon.",
+  "scripts": {
+    "test": "node --test test/"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
