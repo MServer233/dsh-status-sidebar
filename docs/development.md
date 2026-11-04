@@ -73,10 +73,11 @@ node --test test/
 - 新一轮对话触发、subagent 忽略、并发合并；
 - 离线载入零请求、`online` 恢复；
 - 在线不可达时 5s/10s/10s/30s/1min/1min 退避；
-- 断网瞬间发布回退图标、中止在途读取、丢弃迟到结果；
+- 断网瞬间发布 `wifi-off` 图标、中止在途读取、丢弃迟到结果；
 - 主动探测：`navigator.onLine` 仍为 true 时由 Host 探测切到离线、恢复后重读、探测失败中止
   在途读取、旧探测结果不覆盖新状态、探测路由缺失不误报；
 - `online` 与 `navigator.connection` 类型切换立即重读并重置退避；
+- 图标映射：等待时 `history`、读取失败时 `wifi-off`、各状态图形与颜色、尺寸与 1.6 线宽；
 - 卸载移除监听器、两类定时器与在途读取。
 
 `test/probe-route.test.mjs` 覆盖 Host 探测路由的 HEAD 请求、`reachable` 分支与 `no-store`。
@@ -88,8 +89,6 @@ node --test test/
 2. **Host 路由**：用真实 `HostConnectionService` + Cordis 挂载插件，调用
    `/api/status-sidebar.feed`，验证 `200 {"status":"resolved"}`、未知路径 `404`、插件卸载后
    路由撤销。
-3. **图标映射**：在 React 桩环境中渲染组件，验证状态 → 图形/颜色 token/尺寸/线宽，以及
-   读取失败时的 `activity` 回退。
 
 ## 验证与限制
 

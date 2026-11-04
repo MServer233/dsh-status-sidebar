@@ -9,28 +9,30 @@
 
 ## 侧栏图标
 
-| `Status:` 值 | 图标 | 颜色 |
+| 状态 | 图标 | 颜色 |
 | --- | --- | --- |
-| `completed`、`resolved` | `check-circle-2` | 绿 |
+| 缺省：`completed`、`resolved`、其他值 | `activity` | `currentColor` |
+| 首次读取尚未完成（等待 fetch 返回） | `history` | `currentColor` |
 | `investigating`、`identified`、`monitoring` | `circle-alert` | 红 |
-| `ongoing` | `clock-alert` | 红 |
-| `scheduled` | `clock` | 黄 |
-| 其他值、尚未读取、读取失败或断网 | `activity` | 主题主墨色（深色主题下为白） |
+| `ongoing` | `calendar-sync` | 红 |
+| `scheduled` | `calendar-clock` | 黄 |
+| 网络异常、读取失败或断网 | `wifi-off` | 红 |
 
-- 颜色取自宿主主题 token：`--dsw-alias-state-success-primary`、`--dsw-alias-state-error-primary`、
-  `--dsw-alias-state-warn-primary`；回退图标使用 `currentColor`。
+- 颜色取自宿主主题 token：`--dsw-alias-state-error-primary`、`--dsw-alias-state-warn-primary`；
+  其余图标使用 `currentColor`（主题主墨色，深色主题下为白）。
 - 图标尺寸跟随侧栏：展开 16px、收起 18px；线宽 1.6。
 
 ## 刷新时机
 
-- **页面载入**：在线时立即读取一次；浏览器报告离线时先显示回退状态并启动探测，恢复后再读。
+- **页面载入**：在线时立即读取一次，读取完成前显示 `history`；浏览器报告离线时直接显示
+  `wifi-off` 并启动探测，恢复后再读。
 - **新一轮对话**：某个非 subagent 会话的 `running` 由 false 变为 true 时立即读取。
 - **定时刷新**（基于最近一次成功读取的状态）：
   - `resolved` / `completed`：每 10 分钟。
   - 其他可读状态：每 1 分钟。
 - **在线但 feed 不可达**：按 `5s → 10s → 10s → 30s → 1min → 1min…` 的间隔再确认。
 - **断网 / 恢复**：每 15 秒向 Host 发一次轻量探测（`HEAD feed.rss`，不读正文）。Host 无法
-  连通时图标立即切回 `activity`，并改为每 5 秒探测一次；恢复后立即读取 feed。
+  连通时图标立即切到 `wifi-off`，并改为每 5 秒探测一次；恢复后立即读取 feed。
 - 浏览器的 `offline` / `online` 事件仍作即时提示；若 `navigator.onLine` 因虚拟网卡、VM
   网络等原因没有变化，主动探测仍会在一个探测周期内发现断网。
 - **换网**：`navigator.connection` 的 `type`/`effectiveType` 变化会立即探测并重读；在途读取
@@ -63,7 +65,7 @@ enabled: false → true
 
 ## 已知限制
 
-- 断网检测依赖 15 秒探测周期：最坏约 18 秒（含 3 秒 HEAD 超时）才切到回退图标；恢复后
+- 断网检测依赖 15 秒探测周期：最坏约 18 秒（含 3 秒 HEAD 超时）才切到 `wifi-off`；恢复后
   约 5 秒内开始读取。可调整 `client.js` 的 `PROBE_HEALTHY_MS` / `PROBE_OFFLINE_MS`。
 - 探测是 Host 对 feed 地址的 `HEAD` 请求，只判断连通性，不下载 feed 正文。
 - 面板可见性受浏览器/网络影响；若状态页长时间空白，请检查本机能否直接访问该站点。

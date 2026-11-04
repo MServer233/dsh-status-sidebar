@@ -14,7 +14,6 @@ import vm from 'node:vm';
 const SOURCE = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
 
 const COLORS = {
-  green: 'var(--dsw-alias-state-success-primary, #22c55e)',
   red: 'var(--dsw-alias-state-error-primary, #f25a5a)',
   yellow: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
   rest: 'currentColor',
@@ -142,11 +141,17 @@ function createHarness({ online = true } = {}) {
   return {
     reads,
     probes,
-    /** Render the glyph and read the stroke of its SVG. */
+    /** Render the glyph and read the stroke, size, and shape of its SVG. */
     glyph() {
       const tree = iconComponent({ size: 16, useSessions: undefined });
       const nodes = tree.children.flat(Infinity).filter(node => node && node.type);
-      return { stroke: tree.props.stroke, shape: nodes.map(node => node.type).join(' ') };
+      return {
+        stroke: tree.props.stroke,
+        strokeWidth: tree.props.strokeWidth,
+        width: tree.props.width,
+        height: tree.props.height,
+        shape: nodes.map(node => node.type).join(' '),
+      };
     },
     /** Poll-free count of listener-driven state updates. */
     takeStateUpdates() {
@@ -196,13 +201,14 @@ function createHarness({ online = true } = {}) {
   };
 }
 
-test('offline publishes the fallback at once and drops the in-flight read', async () => {
+test('offline publishes the unreadable mark at once and drops the in-flight read', async () => {
   const hs = createHarness();
   assert.equal(hs.reads.length, 1);
 
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().shape, 'path');
   assert.deepEqual(hs.timerDelays(), [600000]);
 
   hs.runTimer();
@@ -211,8 +217,8 @@ test('offline publishes the fallback at once and drops the in-flight read', asyn
   hs.takeStateUpdates();
   hs.goOffline();
   // The glyph updates without waiting for the read to settle.
-  assert.equal(hs.glyph().stroke, COLORS.rest);
-  assert.equal(hs.glyph().shape, 'path');
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path');
   assert.ok(hs.takeStateUpdates() > 0, 'the subscribed glyph was notified');
   assert.equal(hs.reads[1].aborted, true);
   assert.deepEqual(hs.timerDelays(), []);
@@ -220,7 +226,8 @@ test('offline publishes the fallback at once and drops the in-flight read', asyn
   // A transport that ignored the abort and succeeded late must not apply.
   hs.reads[1].succeed({ status: 'investigating' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path');
   assert.equal(hs.reads.length, 2, 'no request is made while offline');
 });
 
@@ -230,27 +237,29 @@ test('online reads immediately, applies the new status, and re-arms the cadence'
   await flush();
 
   hs.goOffline();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.red);
 
   hs.goOnline();
   assert.equal(hs.reads.length, 2);
   hs.reads[1].succeed({ status: 'ongoing' });
   await flush();
   assert.equal(hs.glyph().stroke, COLORS.red);
-  assert.equal(hs.glyph().shape, 'path path path path');
+  assert.equal(hs.glyph().shape, 'path path path path path path path path');
   assert.deepEqual(hs.timerDelays(), [60000]);
 });
 
-test('a page load while offline sends nothing and shows the fallback', async () => {
+test('a page load while offline sends nothing and shows the unreadable mark', async () => {
   const hs = createHarness({ online: false });
   assert.equal(hs.reads.length, 0);
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path');
 
   hs.goOnline();
   assert.equal(hs.reads.length, 1);
   hs.reads[0].succeed({ status: 'scheduled' });
   await flush();
   assert.equal(hs.glyph().stroke, COLORS.yellow);
+  assert.equal(hs.glyph().shape, 'path path path path path circle');
   assert.deepEqual(hs.timerDelays(), [60000]);
 });
 
@@ -292,7 +301,7 @@ test('a connection type switch preempts the read and drops its result', async ()
 
   hs.reads[1].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
 
   hs.reads[2].succeed({ status: 'investigating' });
   await flush();
@@ -304,7 +313,7 @@ test('a failed Host probe goes offline while navigator still reports online', as
   const hs = createHarness();
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 
   // A healthy probe only confirms reachability; it does not read the feed.
@@ -317,7 +326,8 @@ test('a failed Host probe goes offline while navigator still reports online', as
   hs.fireProbe();
   hs.probes[1].succeed({ reachable: false });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path');
   assert.deepEqual(hs.probeIntervals(), [5000]);
 
   // Recovery also works through the probe, without an `online` event.
@@ -328,6 +338,7 @@ test('a failed Host probe goes offline while navigator still reports online', as
   hs.reads[1].succeed({ status: 'ongoing' });
   await flush();
   assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path path');
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -342,7 +353,8 @@ test('a failed probe aborts the read already in flight', async () => {
   hs.probes[0].succeed({ reachable: false });
   await flush();
   assert.equal(hs.reads[1].aborted, true);
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.red);
+  assert.equal(hs.glyph().shape, 'path path path path path path path');
   assert.deepEqual(hs.probeIntervals(), [5000]);
 });
 
@@ -357,6 +369,7 @@ test('a reachable Host probe restores an offline page load without an online eve
   hs.reads[0].succeed({ status: 'scheduled' });
   await flush();
   assert.equal(hs.glyph().stroke, COLORS.yellow);
+  assert.equal(hs.glyph().shape, 'path path path path path circle');
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -373,7 +386,7 @@ test('a stale probe failure cannot undo a newer online transition', async () => 
   await flush();
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -385,7 +398,7 @@ test('a missing probe route is not mistaken for a dead network', async () => {
   hs.fireProbe();
   hs.probes[0].failStatus(404);
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().stroke, COLORS.rest);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -403,5 +416,47 @@ test('cleanup removes listeners, timers, and the in-flight read', async () => {
   assert.deepEqual(hs.listenerCounts(), { window: 0, connection: 0 });
 
   hs.goOffline();
-  assert.equal(hs.glyph().stroke, COLORS.green, 'no listener reacts after cleanup');
+  assert.equal(hs.glyph().stroke, COLORS.rest, 'no listener reacts after cleanup');
+});
+
+test('glyph mapping covers pending, unreadable, and every incident status', async () => {
+  const pending = createHarness();
+  assert.deepEqual(pending.glyph(), {
+    stroke: COLORS.rest,
+    strokeWidth: 1.6,
+    width: 16,
+    height: 16,
+    shape: 'path path path',
+  });
+  pending.cleanup();
+
+  const unreadable = createHarness();
+  unreadable.reads[0].succeed({ status: null });
+  await flush();
+  assert.deepEqual(unreadable.glyph(), {
+    stroke: COLORS.red,
+    strokeWidth: 1.6,
+    width: 16,
+    height: 16,
+    shape: 'path path path path path path path',
+  });
+  unreadable.cleanup();
+
+  const cases = [
+    ['investigating', COLORS.red, 'circle line line'],
+    ['identified', COLORS.red, 'circle line line'],
+    ['monitoring', COLORS.red, 'circle line line'],
+    ['ongoing', COLORS.red, 'path path path path path path path path'],
+    ['scheduled', COLORS.yellow, 'path path path path path circle'],
+    ['resolved', COLORS.rest, 'path'],
+    ['completed', COLORS.rest, 'path'],
+    ['maintenance', COLORS.rest, 'path'],
+  ];
+  for (const [status, stroke, shape] of cases) {
+    const hs = createHarness();
+    hs.reads[0].succeed({ status });
+    await flush();
+    assert.deepEqual(hs.glyph(), { stroke, strokeWidth: 1.6, width: 16, height: 16, shape }, status);
+    hs.cleanup();
+  }
 });

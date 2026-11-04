@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
      * the merge back to `main` restores `false`. Traces use `console.debug`,
      * so they stay hidden unless the browser console enables that level.
      */
-    const DEBUG = false;
+    const DEBUG = true;
 
     /** Emit one structured trace record; `detail` may be a lazy thunk. */
     function debugLog(event, detail) {
@@ -128,7 +128,6 @@ window.__ModuleLoader__.load({
 
     /** Theme state colors; the literal fallback covers themes without the token. */
     const COLORS = {
-      green: 'var(--dsw-alias-state-success-primary, #22c55e)',
       red: 'var(--dsw-alias-state-error-primary, #f25a5a)',
       yellow: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
       rest: 'currentColor',
@@ -143,39 +142,59 @@ window.__ModuleLoader__.load({
       activity: [
         ['path', { d: 'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2' }],
       ],
-      'check-circle-2': [
-        ['circle', { cx: 12, cy: 12, r: 10 }],
-        ['path', { d: 'm16 9-5.5 5.5L8 12' }],
+      history: [
+        ['path', { d: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8' }],
+        ['path', { d: 'M3 3v5h5' }],
+        ['path', { d: 'M12 7v5l4 2' }],
       ],
       'circle-alert': [
         ['circle', { cx: 12, cy: 12, r: 10 }],
         ['line', { x1: 12, x2: 12, y1: 8, y2: 12 }],
         ['line', { x1: 12, x2: 12.01, y1: 16, y2: 16 }],
       ],
-      'clock-alert': [
-        ['path', { d: 'M12 6v6l4 2' }],
-        ['path', { d: 'M20 12v5' }],
-        ['path', { d: 'M20 21h.01' }],
-        ['path', { d: 'M21.25 8.2A10 10 0 1 0 16 21.16' }],
+      'calendar-sync': [
+        ['path', { d: 'M11 10v4h4' }],
+        ['path', { d: 'm11 14 1.535-1.605a5 5 0 0 1 8 1.5' }],
+        ['path', { d: 'M16 2v3' }],
+        ['path', { d: 'm21 18-1.535 1.605a5 5 0 0 1-8-1.5' }],
+        ['path', { d: 'M21 22v-4h-4' }],
+        ['path', { d: 'M21 8.517V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.517' }],
+        ['path', { d: 'M3 9h4' }],
+        ['path', { d: 'M8 2v3' }],
       ],
-      clock: [
-        ['circle', { cx: 12, cy: 12, r: 10 }],
-        ['path', { d: 'M12 6v6l4 2' }],
+      'calendar-clock': [
+        ['path', { d: 'M16 14v2.2l1.6 1' }],
+        ['path', { d: 'M16 2v3' }],
+        ['path', { d: 'M21 7.338V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2.338' }],
+        ['path', { d: 'M3 9h5.859' }],
+        ['path', { d: 'M8 2v3' }],
+        ['circle', { cx: 16, cy: 16, r: 6 }],
+      ],
+      'wifi-off': [
+        ['path', { d: 'M12 20h.01' }],
+        ['path', { d: 'M8.5 16.429a5 5 0 0 1 7 0' }],
+        ['path', { d: 'M5 12.859a10 10 0 0 1 5.17-2.69' }],
+        ['path', { d: 'M19 12.859a10 10 0 0 0-2.007-1.523' }],
+        ['path', { d: 'M2 8.82a15 15 0 0 1 4.177-2.643' }],
+        ['path', { d: 'M22 8.82a15 15 0 0 0-11.288-3.764' }],
+        ['path', { d: 'm2 2 20 20' }],
       ],
     };
 
-    /** Incident status -> sidebar glyph. Unknown or unreadable statuses keep `activity`. */
+    /** Incident status -> sidebar glyph. Unknown statuses keep `activity`. */
     const STATUS_GLYPHS = {
-      completed: { glyph: 'check-circle-2', color: COLORS.green },
-      resolved: { glyph: 'check-circle-2', color: COLORS.green },
       investigating: { glyph: 'circle-alert', color: COLORS.red },
       identified: { glyph: 'circle-alert', color: COLORS.red },
       monitoring: { glyph: 'circle-alert', color: COLORS.red },
-      ongoing: { glyph: 'clock-alert', color: COLORS.red },
-      scheduled: { glyph: 'clock', color: COLORS.yellow },
+      ongoing: { glyph: 'calendar-sync', color: COLORS.red },
+      scheduled: { glyph: 'calendar-clock', color: COLORS.yellow },
     };
 
-    /** Displayed before the feed read settles, and for every unknown status. */
+    /** The first read has not settled yet: a neutral clock-rewind mark. */
+    const PENDING_GLYPH = { glyph: 'history', color: COLORS.rest };
+    /** The feed could not be fetched, including while the link is down. */
+    const UNREADABLE_GLYPH = { glyph: 'wifi-off', color: COLORS.red };
+    /** Every status without a dedicated mark, such as `resolved` or an unknown value. */
     const FALLBACK_GLYPH = { glyph: 'activity', color: COLORS.rest };
 
     /** States that count as normal; everything else uses the fast cadence. */
@@ -461,7 +480,7 @@ window.__ModuleLoader__.load({
         debugLog('read:result', () => ({ ...snapshot(), outcome, result }));
       }
 
-      /** No network: stop reading, show the fallback, and probe for recovery. */
+      /** No network: stop reading, publish the unreadable mark, and probe for recovery. */
       function markOffline(reason) {
         const wasOnline = state.online;
         state.generation += 1;
@@ -578,15 +597,17 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Sidebar glyph: the newest incident status as a Lucide mark, or the plain
-     * `activity` mark while the feed is unreadable.
+     * Sidebar glyph: `history` while the first read is in flight, `wifi-off`
+     * when no status could be fetched, and the status mark once it arrives.
      */
     function StatusPanelIcon({ size, useSessions }) {
       const status = useFeedStatus();
       useTurnRefresh(useSessions);
-      const mark = typeof status === 'string' && Object.hasOwn(STATUS_GLYPHS, status)
-        ? STATUS_GLYPHS[status]
-        : FALLBACK_GLYPH;
+      let mark;
+      if (status === undefined) mark = PENDING_GLYPH;
+      else if (status === null) mark = UNREADABLE_GLYPH;
+      else if (typeof status === 'string' && Object.hasOwn(STATUS_GLYPHS, status)) mark = STATUS_GLYPHS[status];
+      else mark = FALLBACK_GLYPH;
       // Confirms the glyph actually re-rendered with the new published status.
       debugLog('icon:render', () => ({
         status: typeof status === 'string' ? status : null,
@@ -706,7 +727,7 @@ window.__ModuleLoader__.load({
           browser?.addEventListener?.('online', onOnline);
           connection?.addEventListener?.('change', onConnectionChange);
           // Load-time connectivity check: an offline reader sends nothing and
-          // publishes the fallback; `online` starts the first read.
+          // publishes the unreadable mark; `online` starts the first read.
           reader.start();
           return () => {
             browser?.removeEventListener?.('offline', onOffline);

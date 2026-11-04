@@ -36,7 +36,7 @@ export function apply(ctx) {
         if (!response.ok) return statusResponse(null);
         return statusResponse(latestStatus(await response.text()));
       } catch {
-        // Offline, timed out, or an unreadable body: the Client keeps its fallback glyph.
+        // Offline, timed out, or an unreadable body: the Client shows `wifi-off`.
         return statusResponse(null);
       }
     },

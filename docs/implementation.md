@@ -92,7 +92,7 @@
 
 ### 触发
 
-- **页面载入**：`start()`；浏览器已离线时先发布回退状态并立即探测，确认可达后再读取。
+- **页面载入**：`start()`；浏览器已离线时先发布 `null`（`wifi-off`）并立即探测，确认可达后再读取。
 - **新一轮对话**：`useSessions` 选择器返回“非 subagent 且 `running` 为 true”的会话 id 集合；
   集合中出现新 id（即上一轮结束后重新开始）时调用 `refresh()`。subagent 轮次被忽略。
 - **定时**：读取成功后，`resolved`/`completed` 排 10 分钟，其他可读状态排 1 分钟。
@@ -103,7 +103,7 @@
 
 1. **主动探测**是断网/恢复的权威来源，正常 15 秒一次，离线 5 秒一次。
 2. `offline`：立即递增 `generation`、清空 read 定时器、中止在途读取与探测、发布 `null`，
-   图标回退为 `activity`。
+   图标切换为 `wifi-off`。
 3. `online`：立即读取并重置退避，同时立刻发起一次探测；若探测失败，数秒内会重新离线。
 4. `navigator.connection` 的 `change`：仅当 `type`/`effectiveType` 签名变化（真正的换网，
    而非带宽波动）时按换网处理并探测。
@@ -118,10 +118,12 @@
 ## 图标
 
 - 形状内联自 `lucide-static` v1.67.0（ISC 许可，<https://lucide.dev/icons/>）：`activity`、
-  `check-circle-2`、`circle-alert`、`clock-alert`、`clock`。
-- 状态到图标的映射见[使用说明](usage.md#侧栏图标)。
+  `history`、`circle-alert`、`calendar-sync`、`calendar-clock`、`wifi-off`。
+- 首次读取尚未发布时用 `history`；读取失败或断网（发布 `null`）时用 `wifi-off`；其余状态到
+  图标的映射见[使用说明](usage.md#侧栏图标)。
 - 尺寸使用侧栏传入值（展开 16px / 收起 18px），线宽固定 1.6。
-- 颜色只使用主题 token；回退图标使用 `currentColor`。
+- 颜色：`investigating`/`identified`/`monitoring`/`ongoing` 用红色 token，
+  `scheduled` 用黄色 token；缺省与等待使用 `currentColor`。
 
 ## 样式与本地化
 
