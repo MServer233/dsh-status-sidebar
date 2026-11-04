@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-status-sidebar",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "Sidebar panel that embeds the DeepSeek service status page and mirrors the newest incident status in its icon.",
