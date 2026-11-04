@@ -10,13 +10,13 @@ git log --oneline --decorate
 git tag -n
 ```
 
-- 默认分支为 `main`，发布使用 annotated tag（`v1.1.0`、`v1.0.1`）。
+- 默认分支为 `main`，发布使用 annotated tag（`v1.2.0`、`v1.1.0`、`v1.0.1`）。
 - 仓库目前没有配置 remote，tag 与提交只存在本地。
 
 ## 版本约定
 
 - `package.json` 的 `version` 必须与仓库最新 `v*` tag 去掉 `v` 前缀后的值一致
-  （当前为 `1.1.0`，对应 `v1.1.0`）。
+  （当前为 `1.2.0`，对应 `v1.2.0`）。
 - 发版顺序：先在功能分支更新 `package.json` 的 `version`（并同步文档中的版本号）→ 合并到
   `main` → 在 `main` 上打同名 annotated tag。
 - 功能分支合并前不要单独打版本 tag；tag 必须指向已包含对应版本号的提交。
