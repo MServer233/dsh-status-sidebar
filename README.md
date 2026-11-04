@@ -24,10 +24,14 @@
   刷新通过更换 iframe 的 React key 重新加载。加载完成前显示加载提示。
 - 样式只使用宿主主题 token（`--dsw-alias-*`），不依赖任何 Harness Client 包。
 - 可见文案通过 Client locale 服务（命名空间 `statusSidebar`）提供英文与中文。
-- 侧栏图标在网页启动时读取一次最新状态：Client 的 `apply()` 立即请求 Host 路由
-  `api/status-sidebar.feed`；Host 拉取 `feed.rss`，取第一个 `<item>` 的 `<description>`，
-  解码 XML 实体后用 `<p><strong>Status:</strong> {status}</p>` 的特征（捕获从
-  `</strong>` 后的空格之后开始）得到 `{status}`。
+- 侧栏图标在以下时机读取最新状态：网页启动时（`apply()` 立即请求一次 Host 路由
+  `api/status-sidebar.feed`）；用户开始新一轮对话时（`useSessions` 中某个非 subagent
+  会话的 `running` 由 false 变为 true，立即刷新并重置计时）；以及按时间定时刷新
+  （最新状态为 `resolved`/`completed` 时每 10 分钟，其他状态或读取失败时每 1 分钟）。
+  并发请求共享同一次读取；插件卸载时清除定时器。
+- Host 拉取 `feed.rss`，取第一个 `<item>` 的 `<description>`，解码 XML 实体后用
+  `<p><strong>Status:</strong> {status}</p>` 的特征（捕获从 `</strong>` 后的空格之后开始）
+  得到 `{status}`。
 - 图标映射：`completed`/`resolved` → 绿色 `check-circle-2`；`investigating`/`identified`/
   `monitoring` → 红色 `circle-alert`；`ongoing` → 红色 `clock-alert`；`scheduled` → 黄色
   `clock`；其他状态或读取失败 → 白色（`currentColor`）`activity`。绿/红/黄取自主题 token
@@ -61,6 +65,8 @@
   会话）。成功返回 `{ "status": "resolved" }`，无法读取时返回 `{ "status": null }`。
 - 解析逻辑已用 Node 脚本对实时 feed 与全部 7 种状态样例验证；图标映射在 React 桩环境中验证
   （状态、颜色 token、图形、16px / 1.6 线宽）。Host 路由与离线回退也已单独验证。
+- 刷新调度同样在 React 桩环境中验证：启动读取、10 分钟 / 1 分钟两档计时、新一轮对话触发、
+  并发合并、subagent 轮次忽略、失败回退。
 - 面板可见性受浏览器/网络影响；若状态页长时间空白，请检查本机能否直接访问该站点。
 - 视觉渲染需在运行中的 Web GUI 中人工确认（本环境没有浏览器截图能力）。
 

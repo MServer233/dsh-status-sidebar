@@ -163,15 +163,26 @@ window.__ModuleLoader__.load({
     /** Displayed before the feed read settles, and for every unknown status. */
     const FALLBACK_GLYPH = { glyph: 'activity', color: COLORS.rest };
 
+    /** States that count as normal; everything else uses the fast cadence. */
+    const NORMAL_STATUSES = new Set(['resolved', 'completed']);
+    /** Refresh cadence while the newest incident is resolved or completed. */
+    const NORMAL_REFRESH_MS = 10 * 60 * 1000;
+    /** Refresh cadence for an active incident, an unknown status, or a failed read. */
+    const ALERT_REFRESH_MS = 60 * 1000;
+
     /**
-     * Newest status from the startup read: undefined until it settles, null
-     * when the feed or its `Status:` paragraph could not be read.
+     * Newest status from the latest read: undefined until the first read
+     * settles, null when the feed or its `Status:` paragraph could not be read.
      */
     let feedStatus;
 
     const feedListeners = new Set();
 
-    let feedRead;
+    let refreshPromise;
+
+    let refreshTimer;
+
+    let reading = true;
 
     /** Publish the settled status so a mounted glyph re-renders. */
     function publishFeedStatus(status) {
@@ -179,24 +190,38 @@ window.__ModuleLoader__.load({
       for (const listener of [...feedListeners]) listener();
     }
 
+    /** Re-arm the read at the cadence the latest status implies. */
+    function scheduleRefresh() {
+      if (!reading) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshStatus();
+      }, NORMAL_STATUSES.has(feedStatus) ? NORMAL_REFRESH_MS : ALERT_REFRESH_MS);
+    }
+
     /**
-     * Read the status once per page start. The Host route bypasses the feed's
-     * missing CORS header and extracts the `Status:` value server-side.
+     * Read the status now and re-arm the cadence. Concurrent callers share one
+     * read; the Host route bypasses the feed's missing CORS header.
      */
-    function readFeedOnce() {
-      if (feedRead !== undefined) return feedRead;
-      feedRead = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
+    function refreshStatus() {
+      if (refreshPromise !== undefined) return refreshPromise;
+      clearTimeout(refreshTimer);
+      refreshPromise = fetch(FEED_ROUTE, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
         .then(response => (response.ok ? response.json() : null))
         .then((body) => {
           publishFeedStatus(typeof body?.status === 'string' ? body.status : null);
         })
         .catch(() => {
           publishFeedStatus(null);
+        })
+        .then(() => {
+          refreshPromise = undefined;
+          scheduleRefresh();
         });
-      return feedRead;
+      return refreshPromise;
     }
 
-    /** Subscribe the glyph to the one startup read. */
+    /** Subscribe the glyph to the latest read. */
     function useFeedStatus() {
       const [status, setStatus] = React.useState(feedStatus);
       React.useEffect(() => {
@@ -209,11 +234,39 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Refresh when a listed Session starts a new turn: `running` reappears
+     * after the previous turn stopped. Subagent turns are not user rounds.
+     */
+    function useTurnRefresh(useSessions) {
+      const sessions = useSessions ?? (() => '');
+      const running = sessions((state) => {
+        const ids = [];
+        for (const id of state.ids) {
+          const row = state.byId[id];
+          if (row?.running === true && row.origin !== 'subagent') ids.push(id);
+        }
+        return ids.sort().join('|');
+      });
+      const previous = React.useRef(undefined);
+      React.useEffect(() => {
+        if (previous.current === undefined) {
+          previous.current = running;
+          return;
+        }
+        const before = previous.current === '' ? [] : previous.current.split('|');
+        const after = running === '' ? [] : running.split('|');
+        previous.current = running;
+        if (after.some(id => !before.includes(id))) refreshStatus();
+      }, [running]);
+    }
+
+    /**
      * Sidebar glyph: the newest incident status as a Lucide mark, or the plain
      * `activity` mark while the feed is unreadable.
      */
-    function StatusPanelIcon({ size }) {
+    function StatusPanelIcon({ size, useSessions }) {
       const status = useFeedStatus();
+      useTurnRefresh(useSessions);
       const mark = typeof status === 'string' && Object.hasOwn(STATUS_GLYPHS, status)
         ? STATUS_GLYPHS[status]
         : FALLBACK_GLYPH;
@@ -306,7 +359,14 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
-        readFeedOnce();
+        ctx.effect(() => {
+          reading = true;
+          refreshStatus();
+          return () => {
+            reading = false;
+            clearTimeout(refreshTimer);
+          };
+        }, 'dsh-status-sidebar: feed reads');
 
         ctx.effect(
           () => ctx.locale.register(NS, DICTS),
