@@ -77,7 +77,8 @@ node --test test/
 - 主动探测：`navigator.onLine` 仍为 true 时由 Host 探测切到离线、恢复后重读、探测失败中止
   在途读取、旧探测结果不覆盖新状态、探测路由缺失不误报；
 - `online` 与 `navigator.connection` 类型切换立即重读并重置退避；
-- 图标映射：等待时 `history`、读取失败时 `wifi-off`、各状态图形与颜色、尺寸与 1.6 线宽；
+- 图标映射：正常状态 `check-circle-2`、等待时 `history`、读取失败时 `wifi-off`、各状态图形与
+  颜色、尺寸与 1.6 线宽；
 - 卸载移除监听器、两类定时器与在途读取。
 
 `test/probe-route.test.mjs` 覆盖 Host 探测路由的 HEAD 请求、`reachable` 分支与 `no-store`。

@@ -118,12 +118,12 @@
 ## 图标
 
 - 形状内联自 `lucide-static` v1.67.0（ISC 许可，<https://lucide.dev/icons/>）：`activity`、
-  `history`、`circle-alert`、`calendar-sync`、`calendar-clock`、`wifi-off`。
-- 首次读取尚未发布时用 `history`；读取失败或断网（发布 `null`）时用 `wifi-off`；其余状态到
-  图标的映射见[使用说明](usage.md#侧栏图标)。
+  `check-circle-2`、`history`、`circle-alert`、`calendar-sync`、`calendar-clock`、`wifi-off`。
+- `resolved`/`completed` 用绿色 `check-circle-2`；首次读取尚未发布时用 `history`；读取失败或
+  断网（发布 `null`）时用 `wifi-off`；未知值用 `activity`，映射见[使用说明](usage.md#侧栏图标)。
 - 尺寸使用侧栏传入值（展开 16px / 收起 18px），线宽固定 1.6。
-- 颜色：`investigating`/`identified`/`monitoring`/`ongoing` 用红色 token，
-  `scheduled` 用黄色 token；缺省与等待使用 `currentColor`。
+- 颜色：`resolved`/`completed` 用绿色 token；`investigating`/`identified`/`monitoring`/`ongoing`
+  用红色 token，`scheduled` 用黄色 token；缺省与等待使用 `currentColor`。
 
 ## 样式与本地化
 

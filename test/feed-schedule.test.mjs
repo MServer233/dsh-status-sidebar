@@ -14,6 +14,7 @@ import vm from 'node:vm';
 const SOURCE = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
 
 const COLORS = {
+  green: 'var(--dsw-alias-state-success-primary, #22c55e)',
   red: 'var(--dsw-alias-state-error-primary, #f25a5a)',
   yellow: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
   rest: 'currentColor',
@@ -207,8 +208,8 @@ test('offline publishes the unreadable mark at once and drops the in-flight read
 
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
-  assert.equal(hs.glyph().shape, 'path');
+  assert.equal(hs.glyph().stroke, COLORS.green);
+  assert.equal(hs.glyph().shape, 'circle path');
   assert.deepEqual(hs.timerDelays(), [600000]);
 
   hs.runTimer();
@@ -301,7 +302,7 @@ test('a connection type switch preempts the read and drops its result', async ()
 
   hs.reads[1].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.green);
 
   hs.reads[2].succeed({ status: 'investigating' });
   await flush();
@@ -313,7 +314,7 @@ test('a failed Host probe goes offline while navigator still reports online', as
   const hs = createHarness();
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.green);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 
   // A healthy probe only confirms reachability; it does not read the feed.
@@ -386,7 +387,7 @@ test('a stale probe failure cannot undo a newer online transition', async () => 
   await flush();
   hs.reads[0].succeed({ status: 'resolved' });
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.green);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -398,7 +399,7 @@ test('a missing probe route is not mistaken for a dead network', async () => {
   hs.fireProbe();
   hs.probes[0].failStatus(404);
   await flush();
-  assert.equal(hs.glyph().stroke, COLORS.rest);
+  assert.equal(hs.glyph().stroke, COLORS.green);
   assert.deepEqual(hs.probeIntervals(), [15000]);
 });
 
@@ -416,7 +417,7 @@ test('cleanup removes listeners, timers, and the in-flight read', async () => {
   assert.deepEqual(hs.listenerCounts(), { window: 0, connection: 0 });
 
   hs.goOffline();
-  assert.equal(hs.glyph().stroke, COLORS.rest, 'no listener reacts after cleanup');
+  assert.equal(hs.glyph().stroke, COLORS.green, 'no listener reacts after cleanup');
 });
 
 test('glyph mapping covers pending, unreadable, and every incident status', async () => {
@@ -448,8 +449,8 @@ test('glyph mapping covers pending, unreadable, and every incident status', asyn
     ['monitoring', COLORS.red, 'circle line line'],
     ['ongoing', COLORS.red, 'path path path path path path path path'],
     ['scheduled', COLORS.yellow, 'path path path path path circle'],
-    ['resolved', COLORS.rest, 'path'],
-    ['completed', COLORS.rest, 'path'],
+    ['resolved', COLORS.green, 'circle path'],
+    ['completed', COLORS.green, 'circle path'],
     ['maintenance', COLORS.rest, 'path'],
   ];
   for (const [status, stroke, shape] of cases) {

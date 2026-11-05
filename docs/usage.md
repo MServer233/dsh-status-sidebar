@@ -11,15 +11,16 @@
 
 | 状态 | 图标 | 颜色 |
 | --- | --- | --- |
-| 缺省：`completed`、`resolved`、其他值 | `activity` | `currentColor` |
+| `completed`、`resolved` | `check-circle-2` | 绿 |
+| 缺省：其他未知值 | `activity` | `currentColor` |
 | 首次读取尚未完成（等待 fetch 返回） | `history` | `currentColor` |
 | `investigating`、`identified`、`monitoring` | `circle-alert` | 红 |
 | `ongoing` | `calendar-sync` | 红 |
 | `scheduled` | `calendar-clock` | 黄 |
 | 网络异常、读取失败或断网 | `wifi-off` | 红 |
 
-- 颜色取自宿主主题 token：`--dsw-alias-state-error-primary`、`--dsw-alias-state-warn-primary`；
-  其余图标使用 `currentColor`（主题主墨色，深色主题下为白）。
+- 颜色取自宿主主题 token：`--dsw-alias-state-success-primary`、`--dsw-alias-state-error-primary`、
+  `--dsw-alias-state-warn-primary`；其余图标使用 `currentColor`（主题主墨色，深色主题下为白）。
 - 图标尺寸跟随侧栏：展开 16px、收起 18px；线宽 1.6。
 
 ## 刷新时机

@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
      * the merge back to `main` restores `false`. Traces use `console.debug`,
      * so they stay hidden unless the browser console enables that level.
      */
-    const DEBUG = false;
+    const DEBUG = true;
 
     /** Emit one structured trace record; `detail` may be a lazy thunk. */
     function debugLog(event, detail) {
@@ -128,6 +128,7 @@ window.__ModuleLoader__.load({
 
     /** Theme state colors; the literal fallback covers themes without the token. */
     const COLORS = {
+      green: 'var(--dsw-alias-state-success-primary, #22c55e)',
       red: 'var(--dsw-alias-state-error-primary, #f25a5a)',
       yellow: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
       rest: 'currentColor',
@@ -141,6 +142,10 @@ window.__ModuleLoader__.load({
     const GLYPHS = {
       activity: [
         ['path', { d: 'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2' }],
+      ],
+      'check-circle-2': [
+        ['circle', { cx: 12, cy: 12, r: 10 }],
+        ['path', { d: 'm16 9-5.5 5.5L8 12' }],
       ],
       history: [
         ['path', { d: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8' }],
@@ -183,6 +188,8 @@ window.__ModuleLoader__.load({
 
     /** Incident status -> sidebar glyph. Unknown statuses keep `activity`. */
     const STATUS_GLYPHS = {
+      completed: { glyph: 'check-circle-2', color: COLORS.green },
+      resolved: { glyph: 'check-circle-2', color: COLORS.green },
       investigating: { glyph: 'circle-alert', color: COLORS.red },
       identified: { glyph: 'circle-alert', color: COLORS.red },
       monitoring: { glyph: 'circle-alert', color: COLORS.red },
@@ -194,7 +201,7 @@ window.__ModuleLoader__.load({
     const PENDING_GLYPH = { glyph: 'history', color: COLORS.rest };
     /** The feed could not be fetched, including while the link is down. */
     const UNREADABLE_GLYPH = { glyph: 'wifi-off', color: COLORS.red };
-    /** Every status without a dedicated mark, such as `resolved` or an unknown value. */
+    /** Only a status without a dedicated mark (an unknown value) reaches this. */
     const FALLBACK_GLYPH = { glyph: 'activity', color: COLORS.rest };
 
     /** States that count as normal; everything else uses the fast cadence. */
