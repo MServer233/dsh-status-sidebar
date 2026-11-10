@@ -10,3 +10,5 @@
 - [开发与发版](docs/development.md)：版本约定、改动生效方式、测试与验证
 
 安装与重载命令见[使用说明](docs/usage.md#安装与卸载)。
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
